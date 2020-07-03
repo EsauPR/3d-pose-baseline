@@ -1,4 +1,6 @@
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import tensorflow as tf
@@ -85,7 +87,7 @@ def read_openpose_json(smooth=True, *args):
                 #map jnt 10 to 9
                 if x==10*2:
                     _xy[18] = xy[x]
-                    _xy[19] = xy[x+1]         
+                    _xy[19] = xy[x+1]
                 #map jnt 11 to 10
                 if x==11*2:
                     _xy[20] = xy[x]
@@ -97,7 +99,7 @@ def read_openpose_json(smooth=True, *args):
                 #map jnt 13 to 12
                 if x==13*2:
                     _xy[24] = xy[x]
-                    _xy[25] = xy[x+1]         
+                    _xy[25] = xy[x+1]
                 #map jnt 14 to 13
                 if x==14*2:
                     _xy[26] = xy[x]
@@ -118,7 +120,7 @@ def read_openpose_json(smooth=True, *args):
                 if x==18*2:
                     _xy[34] = xy[x]
                     _xy[35] = xy[x+1]
-            #coco 
+            #coco
             xy = _xy
 
         #add xy to frame
@@ -149,7 +151,7 @@ def read_openpose_json(smooth=True, *args):
     head_frame_block = [int(re.findall("(\d+)", o)[-1]) for o in json_files[:4]]
     tail_frame_block = [int(re.findall("(\d+)", o)[-1]) for o in json_files[-4:]]
 
-    ### smooth by median value, n frames 
+    ### smooth by median value, n frames
     for frame, xy in cache.items():
         # create neighbor array based on frame index
         forward, back = ([] for _ in range(2))
@@ -166,14 +168,14 @@ def read_openpose_json(smooth=True, *args):
             elif frame in tail_frame_block:
                 back += cache[frame-neighbor]
             else:
-                # between frames, get value of xy in bi-directional frames(current frame -+ 3)     
+                # between frames, get value of xy in bi-directional frames(current frame -+ 3)
                 forward += cache[frame+neighbor]
                 back += cache[frame-neighbor]
 
-        # build frame range vector 
+        # build frame range vector
         frames_joint_median = [0 for i in range(_len)]
         # more info about mapping in src/data_utils.py
-        # for each 18joints*x,y  (x1,y1,x2,y2,...)~36 
+        # for each 18joints*x,y  (x1,y1,x2,y2,...)~36
         for x in range(0,_len,2):
             # set x and y
             y = x+1
@@ -216,9 +218,9 @@ def read_openpose_json(smooth=True, *args):
             logger.debug("old Y {0} sorted neighbor {1} new Y {2}".format(xy[y],sorted(y_v), y_med))
 
             # build new array of joint x and y value
-            frames_joint_median[x] = x_med 
-            frames_joint_median[x+1] = y_med 
-		
+            frames_joint_median[x] = x_med
+            frames_joint_median[x+1] = y_med
+
 
         smoothed[frame] = frames_joint_median
 
@@ -226,7 +228,7 @@ def read_openpose_json(smooth=True, *args):
 
 
 def main(_):
-    
+
     smoothed = read_openpose_json()
     plt.figure(2)
     smooth_curves_plot = show_anim_curves(smoothed, plt)
@@ -234,7 +236,7 @@ def main(_):
     pngName = 'gif_output/smooth_plot.png'
     smooth_curves_plot.savefig(pngName)
     logger.info('writing gif_output/smooth_plot.png')
-    
+
     if FLAGS.interpolation:
         logger.info("start interpolation")
 
@@ -242,7 +244,7 @@ def main(_):
         joint_rows = 36
         array = np.concatenate(list(smoothed.values()))
         array_reshaped = np.reshape(array, (framerange, joint_rows) )
-    
+
         multiplier = FLAGS.multiplier
         multiplier_inv = 1/multiplier
 
@@ -251,7 +253,7 @@ def main(_):
             x = []
             for frame in range(framerange):
                 x.append( array_reshaped[frame, row] )
-            
+
             frame = range( framerange )
             frame_resampled = np.arange(0, framerange, multiplier)
             spl = UnivariateSpline(frame, x, k=3)
@@ -262,25 +264,25 @@ def main(_):
             smooth_fac = smooth_fac * smooth_resamp
             spl.set_smoothing_factor( float(smooth_fac) )
             xnew = spl(frame_resampled)
-            
+
             out_array = np.append(out_array, xnew)
-    
+
         logger.info("done interpolating. reshaping {0} frames,  please wait!!".format(framerange))
-    
+
         a = np.array([])
         for frame in range( int( framerange * multiplier_inv ) ):
             jnt_array = []
             for jnt in range(joint_rows):
                 jnt_array.append( out_array[ jnt * int(framerange * multiplier_inv) + frame] )
             a = np.append(a, jnt_array)
-        
+
         a = np.reshape(a, (int(framerange * multiplier_inv), joint_rows))
         out_array = a
-    
+
         interpolate_smoothed = {}
         for frame in range( int(framerange * multiplier_inv) ):
             interpolate_smoothed[frame] = list( out_array[frame] )
-        
+
         plt.figure(3)
         smoothed = interpolate_smoothed
         interpolate_curves_plot = show_anim_curves(smoothed, plt)
@@ -314,7 +316,7 @@ def main(_):
         twod_export_units = {}
         for n, (frame, xy) in enumerate(smoothed.items()):
             logger.info("calc frame {0}/{1}".format(frame, iter_range))
-            # map list into np array  
+            # map list into np array
             joints_array = np.zeros((1, 36))
             joints_array[0] = [0 for i in range(36)]
             for o in range(len(joints_array[0])):
@@ -382,7 +384,7 @@ def main(_):
 
             # Plot 3d predictions
             ax = plt.subplot(gs1[subplot_idx - 1], projection='3d')
-            ax.view_init(18, -70)    
+            ax.view_init(18, -70)
 
             if FLAGS.cache_on_fail:
                 if np.min(poses3d) < -1000:
@@ -435,7 +437,7 @@ def main(_):
 if __name__ == "__main__":
 
     openpose_output_dir = FLAGS.pose_estimation_json
-    
+
     level = {0:logging.ERROR,
              1:logging.WARNING,
              2:logging.INFO,

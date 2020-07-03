@@ -1,9 +1,9 @@
 
 """Predicting 3d poses from 2d joints"""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+# from __future__ import absolute_import
+# from __future__ import division
+# from __future__ import print_function
 
 import math
 import os
@@ -15,7 +15,7 @@ import copy
 
 import matplotlib.pyplot as plt
 import numpy as np
-from six.moves import xrange  # pylint: disable=redefined-builtin
+# from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 import procrustes
 
