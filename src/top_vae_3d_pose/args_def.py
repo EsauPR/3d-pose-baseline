@@ -35,6 +35,8 @@ class __ENV():
                             help="Use 2d pose predictions from StackedHourglass")
         parser.add_argument("--action", type=str, default="All",
                             help="The action to train on. 'All' means all the actions")
+        parser.add_argument("--optimizer", type=str, default="adam",
+                            help="Optimizer to use [adam, rmsprop]")
 
         # Architecture
         parser.add_argument("--model", type=str, default='VAE',

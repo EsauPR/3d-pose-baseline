@@ -25,15 +25,11 @@ class ELBO():
             # f(z)
             f_z = model.decode(z, apply_sigmoid=False)
             mse_loss = n * tf.keras.losses.mse(x_truth, f_z)
-            # if x_noised == x_truth:
-            #     print(mse_loss + dkl_loss)
             return mse_loss + dkl_loss
         elif ENV.FLAGS.f_loss == 'mae':
             # f(z)
             f_z = model.decode(z, apply_sigmoid=False)
             mae_loss = n * tf.keras.losses.mae(x_truth, f_z)
-            # if x_noised == x_truth:
-            #     print(mae_loss + dkl_loss)
             return mae_loss + dkl_loss
         else:
             raise Exception('Invalid Loss Function: %s' % ENV.FLAGS.f_loss)

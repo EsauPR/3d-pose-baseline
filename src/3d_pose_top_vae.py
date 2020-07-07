@@ -19,8 +19,11 @@ def train_step(model, x_noised, x_truth, optimizer):
 
 
 def get_optimizer():
-    return tf.keras.optimizers.Adam(ENV.FLAGS.learning_rate)
-
+    if ENV.FLAGS.optimizer == 'adam':
+        return tf.keras.optimizers.Adam(ENV.FLAGS.learning_rate)
+    if ENV.FLAGS.optimizer == 'rmsprop':
+        return tf.keras.optimizers.RMSprop(ENV.FLAGS.learning_rate)
+    raise Exception('Optimizer not found: %s' % ENV.FLAGS.optimizer)
 
 def train():
     dataset = data_handler.load_data()
@@ -71,6 +74,8 @@ def main():
     elif ENV.FLAGS.noised_sample:
         # Generate a sample of data with noise
         dataset = data_handler.load_data()
+        print("Dataset dims")
+        print(dataset.train.shape, dataset.test.shape)
         idx = np.random.choice(dataset.train.shape[0], 9, replace=False)
         print(idx)
         real_p = dataset.train[idx, :]

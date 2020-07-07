@@ -89,6 +89,7 @@ def gen_sample_img(real_points, noised_points, mean, std, dim_ignored, model=Non
         file_name = "imgs/vae/%s.png" % datetime.utcnow().isoformat()
     plt.savefig(file_name)
     print("Saved samples on: %s" % file_name)
+    plt.close()
 
 
 def load_data():
