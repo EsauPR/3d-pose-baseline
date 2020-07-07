@@ -381,7 +381,7 @@ def read_2d_predictions( actions, data_dir ):
   train_set = load_stacked_hourglass( data_dir, TRAIN_SUBJECTS, actions)
   test_set  = load_stacked_hourglass( data_dir, TEST_SUBJECTS,  actions)
 
-  complete_train = copy.deepcopy( np.vstack( train_set.values() ))
+  complete_train = copy.deepcopy(np.vstack(list(train_set.values())))
   data_mean, data_std,  dim_to_ignore, dim_to_use = normalization_stats( complete_train, dim=2 )
 
   train_set = normalize_data( train_set, data_mean, data_std, dim_to_use )
@@ -416,7 +416,7 @@ def create_2d_data( actions, data_dir, rcams ):
   test_set  = project_to_cameras( test_set, rcams )
 
   # Compute normalization statistics.
-  complete_train = copy.deepcopy( np.vstack( train_set.values() ))
+  complete_train = copy.deepcopy(np.vstack(list(train_set.values())))
   data_mean, data_std, dim_to_ignore, dim_to_use = normalization_stats( complete_train, dim=2 )
 
   # Divide every dimension independently
@@ -459,7 +459,7 @@ def read_3d_data( actions, data_dir, camera_frame, rcams, predict_14=False ):
   test_set,  test_root_positions  = postprocess_3d( test_set )
 
   # Compute normalization statistics
-  complete_train = copy.deepcopy( np.vstack( train_set.values() ))
+  complete_train = copy.deepcopy(np.vstack(list(train_set.values())))
   data_mean, data_std, dim_to_ignore, dim_to_use = normalization_stats( complete_train, dim=3, predict_14=predict_14 )
 
   # Divide every dimension independently

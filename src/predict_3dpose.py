@@ -227,7 +227,7 @@ def train():
         current_epoch = 0
         log_every_n_batches = 100
 
-        for _ in xrange( FLAGS.epochs ):
+        for _ in range( FLAGS.epochs ):
             current_epoch = current_epoch + 1
 
             # === Load training batches for one epoch ===
