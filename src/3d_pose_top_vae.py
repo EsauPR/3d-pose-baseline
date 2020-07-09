@@ -1,4 +1,5 @@
 import argparse
+import json
 import time
 
 import numpy as np
@@ -9,6 +10,14 @@ from top_vae_3d_pose import data_handler, losses, models
 from top_vae_3d_pose.args_def import ENVIRON as ENV
 
 
+def get_optimizer():
+    if ENV.FLAGS.optimizer == 'adam':
+        return tf.keras.optimizers.Adam(ENV.FLAGS.learning_rate)
+    if ENV.FLAGS.optimizer == 'rmsprop':
+        return tf.keras.optimizers.RMSprop(ENV.FLAGS.learning_rate)
+    raise Exception('Optimizer not found: %s' % ENV.FLAGS.optimizer)
+
+
 @tf.function
 def train_step(model, x_noised, x_truth, optimizer):
     with tf.GradientTape() as tape:
@@ -16,14 +25,6 @@ def train_step(model, x_noised, x_truth, optimizer):
     gradients = tape.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
     return loss
-
-
-def get_optimizer():
-    if ENV.FLAGS.optimizer == 'adam':
-        return tf.keras.optimizers.Adam(ENV.FLAGS.learning_rate)
-    if ENV.FLAGS.optimizer == 'rmsprop':
-        return tf.keras.optimizers.RMSprop(ENV.FLAGS.learning_rate)
-    raise Exception('Optimizer not found: %s' % ENV.FLAGS.optimizer)
 
 
 def train():
@@ -37,6 +38,15 @@ def train():
                        apply_tanh=ENV.FLAGS.apply_tanh)
     optimizer = get_optimizer()
 
+    ckpt = tf.train.Checkpoint(step=tf.Variable(1), optimizer=optimizer, net=model)
+    manager = tf.train.CheckpointManager(ckpt, './experiments/vae/tf_ckpts', max_to_keep=3)
+    ckpt.restore(manager.latest_checkpoint)
+    if manager.latest_checkpoint:
+        print("Restaurado de {}".format(manager.latest_checkpoint))
+    else:
+        print("Inicializando desde cero.")
+
+
     # Indexes for sampling
     idx = np.random.choice(data_test.data.shape[0], 9, replace=False)
 
@@ -48,6 +58,7 @@ def train():
 
     for epoch in range(1, ENV.FLAGS.epochs + 1):
         print("\nStarting epoch:", epoch)
+
 
         loss_train = tf.keras.metrics.Mean()
         start_time = time.time()
@@ -82,11 +93,21 @@ def train():
                                     model=model, idx=idx)
 
         # Reset data for next epoch
-        data_train.on_epoch_end()
-        data_test.on_epoch_end()
+        data_train.on_epoch_end(new_noise=True)
+        data_test.on_epoch_end(new_noise=True)
 
-    data_handler.plot_history(loss_train_history, loss_test_history,
-                              error_pred_history, error_noised_history)
+        ckpt.step.assign_add(1)
+        save_path = manager.save()
+        print("Checkpoint saved: {}".format(save_path))
+
+        data_handler.plot_history(loss_train_history, loss_test_history,
+                                  error_pred_history, error_noised_history)
+
+    # Save the weights of the las model and the config use to run and train
+    model.save_weights('./experiments/vae/last_model_weights')
+    with open('./experiments/vae/train.cfg', 'w') as cfg:
+        json.dump(vars(ENV.FLAGS), cfg)
+
 
 
 def main():
