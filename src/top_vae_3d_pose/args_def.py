@@ -42,13 +42,21 @@ class __ENV():
         parser.add_argument("--model", type=str, default='VAE',
                             help="Model to use: [VAE], default VAE.")
         parser.add_argument("--vae_dim", type=int, nargs='+', default=[200, 10],
-                    help="Dimensions for hidden layer and latent space, default [24, 12]")
+                            help="Dimensions for hidden layer and latent space, default [24, 12]")
 
 
         # Training
-        parser.add_argument("--step_log", type=int, default=1000, help="std for noise to add to truth 3d points")
-        parser.add_argument("--noise_3d", type=float, default=0.5, help="std for noise to add to truth 3d points")
-        parser.add_argument("--f_loss", type=str, default="xent", help="Loss use in ELBO function [xent, mae, mse]")
+        parser.add_argument("--step_log", type=int, default=1000,
+                            help="std for noise to add to truth 3d points")
+        parser.add_argument("--noise_3d", type=float, nargs='+', default=[1, 1],
+                            help="std for noise to add to truth 3d points")
+        parser.add_argument("--f_loss", type=str, default="mse",
+                            help="Loss use in ELBO function [mae, mse]")
+        parser.add_argument("--apply_tanh", action='store_true', default=False,
+                            help="Apply sigmoid activation to the decoder output")
+        parser.add_argument("--likelihood_factor", type=float, default=10,
+                            help="Term to regularize the likelihood loss for ELBO")
+
 
         # Directories
         parser.add_argument("--cameras_path", type=str, default="data/h36m/cameras.h5",

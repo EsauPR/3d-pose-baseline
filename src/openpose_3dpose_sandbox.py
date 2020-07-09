@@ -11,7 +11,7 @@ import cameras
 import json
 import os
 import time
-from predict_3dpose import create_model
+from predict_3dpose import create_model, FLAGS
 import cv2
 import imageio
 import logging
@@ -20,7 +20,7 @@ from pprint import pprint
 from scipy.interpolate import interp1d
 from scipy.interpolate import UnivariateSpline
 
-FLAGS = tf.app.flags.FLAGS
+# FLAGS = tf.app.flags.FLAGS
 
 order = [15, 12, 25, 26, 27, 17, 18, 19, 1, 2, 3, 6, 7, 8]
 

@@ -25,62 +25,82 @@ def get_optimizer():
         return tf.keras.optimizers.RMSprop(ENV.FLAGS.learning_rate)
     raise Exception('Optimizer not found: %s' % ENV.FLAGS.optimizer)
 
+
 def train():
-    dataset = data_handler.load_data()
+    data_train, data_test = data_handler.load_3d_data()
     print("Dataset dims")
-    print(dataset.train.shape, dataset.test.shape)
+    print(data_train.data.shape, data_test.data.shape)
 
-    # Data for traning flow
-    data, data_test = data_handler.make_dataset(dataset.train, dataset.test, batch_size=ENV.FLAGS.batch_size)
-    # Test noised for test and sampling
-    test_noised = data_handler.add_noise(dataset.test)
-
-    model = models.VAE(dataset.train.shape[1], latent_dim=ENV.FLAGS.vae_dim[1], inter_dim=ENV.FLAGS.vae_dim[0])
+    model = models.VAE(data_train.data.shape[1],
+                       latent_dim=ENV.FLAGS.vae_dim[-1],
+                       inter_dim=ENV.FLAGS.vae_dim[:-1],
+                       apply_tanh=ENV.FLAGS.apply_tanh)
     optimizer = get_optimizer()
 
     # Indexes for sampling
-    idx = np.random.choice(dataset.test.shape[0], 9, replace=False)
+    idx = np.random.choice(data_test.data.shape[0], 9, replace=False)
+
+    # Logs for errors and losses
+    error_pred_history = []
+    error_noised_history = []
+    loss_train_history = []
+    loss_test_history = []
 
     for epoch in range(1, ENV.FLAGS.epochs + 1):
         print("\nStarting epoch:", epoch)
+
+        loss_train = tf.keras.metrics.Mean()
         start_time = time.time()
-        for step, (x_noised, x_truth) in enumerate(data):
+        for step, (x_noised, x_truth) in enumerate(data_train):
             step_loss = train_step(model, x_noised, x_truth, optimizer)
+            loss_train(step_loss)
             if step % ENV.FLAGS.step_log == 0:
-                print("  Training loss at step %d: %.4f" % (step, -tf.math.reduce_mean(step_loss)))
+                print("  Training loss at step %d: %.4f" % (step, tf.math.reduce_mean(step_loss)))
                 print("  Seen : %s samples" % ((step + 1) * ENV.FLAGS.batch_size))
         end_time = time.time()
+        loss_train_history.append(loss_train.result())
 
-        loss = tf.keras.metrics.Mean()
-        for x_test in data_test:
-            loss(losses.ELBO.compute_loss(model, x_test, x_test))
-        elbo = loss.result()
+        loss_test = tf.keras.metrics.Mean()
+        error_pred = tf.keras.metrics.Mean()
+        error_noised = tf.keras.metrics.Mean()
+        for x_noised, x_truth in data_test:
+            loss_test(losses.ELBO.compute_loss(model, x_noised, x_truth))
+            err_p, err_n = losses.ELBO.compute_error_real_pred(model, x_noised, x_truth)
+            error_pred(err_p)
+            error_noised(err_n)
+        loss_test_history.append(loss_test.result())
+        error_pred_history.append(error_pred.result())
+        error_noised_history.append(error_noised.result())
 
-        print('Epoch: {}, Test set ELBO: {}, time elapse for current epoch: {}'.format(epoch, elbo, end_time - start_time))
-        print("\nSaving samples...")
-        data_handler.gen_sample_img(dataset.test, test_noised,
-                                    dataset.mean, dataset.std, dataset.dim_ignored,
+        print('Epoch: {}, Test set ELBO: {}, time elapse for current epoch: {}'.format(epoch, loss_test_history[-1], end_time - start_time))
+        tf.print('Error real vs noised:', error_noised_history[-1])
+        tf.print('Error real vs pred:', error_pred_history[-1])
+        tf.print('\nSaving samples...')
+        data_handler.gen_sample_img(data_test.data, data_test.data_noised,
+                                    data_test.metadata.mean, data_test.metadata.std,
+                                    data_test.metadata.dim_ignored, data_test.metadata.max_factor,
                                     model=model, idx=idx)
 
+        # Reset data for next epoch
+        data_train.on_epoch_end()
+        data_test.on_epoch_end()
 
-
-def sample():
-    pass
+    data_handler.plot_history(loss_train_history, loss_test_history,
+                              error_pred_history, error_noised_history)
 
 
 def main():
-    if ENV.FLAGS.sample:
-        sample()
-    elif ENV.FLAGS.noised_sample:
+    if ENV.FLAGS.noised_sample:
         # Generate a sample of data with noise
-        dataset = data_handler.load_data()
+
+        data_train, data_test = data_handler.load_3d_data()
         print("Dataset dims")
-        print(dataset.train.shape, dataset.test.shape)
-        idx = np.random.choice(dataset.train.shape[0], 9, replace=False)
-        print(idx)
-        real_p = dataset.train[idx, :]
-        noised_p = data_handler.add_noise(real_p)
-        data_handler.gen_sample_img(real_p, noised_p, dataset.mean, dataset.std, dataset.dim_ignored)
+        print(data_train.data.shape, data_test.data.shape)
+
+        data_handler.gen_sample_img(data_test.data, data_test.data_noised,
+                                    data_test.metadata.mean, data_test.metadata.std,
+                                    data_test.metadata.dim_ignored, data_test.metadata.max_factor,
+                                    idx=np.random.choice(data_test.data.shape[0], 9, replace=False))
     else:
         train()
 

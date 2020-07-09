@@ -9,27 +9,66 @@ class ELBO():
     @classmethod
     def compute_loss(cls, model, x_noised, x_truth):
         """ ELBO """
-        n = x_noised.shape[1]
+        n = x_noised.shape[1] * ENV.FLAGS.likelihood_factor
+
+        # mean and log var from q(theta: z|x)
+        mean, log_var = model.encode(x_noised)
+        # Latent variables from distribution q
+        z = model.reparametrize(mean, log_var)
+
+        # Dkl(Q(z|x)||P(z))
+        dkl_loss = 0.5 * tf.reduce_sum(tf.math.exp(log_var) + tf.math.square(mean) - 1.0 - log_var,
+                                       axis=-1)
+
+        # sample of P(x|z)
+        px_z = model.decode(z)
+
+        # if ENV.FLAGS.f_loss == 'xent':
+        #     xent_loss = n * tf.keras.losses.binary_crossentropy(x_truth, px_z)
+        #     return xent_loss + dkl_loss
+
+        if ENV.FLAGS.f_loss == 'mse':
+            mse_loss = n * tf.keras.losses.mse(x_truth, px_z)
+            return mse_loss + dkl_loss
+
+        if ENV.FLAGS.f_loss == 'mae':
+            mae_loss = n * tf.keras.losses.mae(x_truth, px_z)
+            return mae_loss + dkl_loss
+
+        raise Exception('Invalid Loss Function: %s' % ENV.FLAGS.f_loss)
+
+
+    @classmethod
+    def compute_error_real_pred(cls, model, x_noised, x_truth, n=None):
+        """ Return the error of the noised samples and decoded samples vs real samples """
+        if n is None:
+            n = x_noised.shape[1]
+
         mean, log_var = model.encode(x_noised)
         z = model.reparametrize(mean, log_var)
 
-        # D(Q(z|x)||P(z))
-        dkl_loss = 0.5 * tf.reduce_sum(tf.math.exp(log_var) + tf.math.square(mean) - 1.0 - log_var, axis=-1)
+        # sample of P(x|z)
+        px_z = model.decode(z)
 
-        if ENV.FLAGS.f_loss == 'xent':
-            # P(x|z)
-            px_z = model.decode(z, apply_sigmoid=True)
-            xent_loss = n * tf.keras.losses.binary_crossentropy(x_truth, px_z)
-            return xent_loss + dkl_loss
-        elif ENV.FLAGS.f_loss == 'mse':
-            # f(z)
-            f_z = model.decode(z, apply_sigmoid=False)
-            mse_loss = n * tf.keras.losses.mse(x_truth, f_z)
-            return mse_loss + dkl_loss
-        elif ENV.FLAGS.f_loss == 'mae':
-            # f(z)
-            f_z = model.decode(z, apply_sigmoid=False)
-            mae_loss = n * tf.keras.losses.mae(x_truth, f_z)
-            return mae_loss + dkl_loss
-        else:
-            raise Exception('Invalid Loss Function: %s' % ENV.FLAGS.f_loss)
+        # if ENV.FLAGS.f_loss == 'xent':
+        #     # Error bettwen real and prediction
+        #     xent_loss = n * tf.keras.losses.binary_crossentropy(x_truth, px_z)
+        #     # Error bettwen real and noised
+        #     xent_loss_noised = n * tf.keras.losses.binary_crossentropy(x_truth, x_noised)
+        #     return xent_loss, xent_loss_noised
+
+        if ENV.FLAGS.f_loss == 'mse':
+            # Error bettwen real and prediction
+            mse_loss = n * tf.keras.losses.mse(x_truth, px_z)
+            # Error bettwen real and noised
+            mse_loss_noised = n * tf.keras.losses.mse(x_truth, x_noised)
+            return mse_loss, mse_loss_noised
+
+        if ENV.FLAGS.f_loss == 'mae':
+            # Error bettwen real and prediction
+            mae_loss = n * tf.keras.losses.mae(x_truth, px_z)
+            # Error bettwen real and noised
+            mae_loss_noised = n * tf.keras.losses.mae(x_truth, x_noised)
+            return mae_loss, mae_loss_noised
+
+        raise Exception('Invalid Loss Function: %s' % ENV.FLAGS.f_loss)
