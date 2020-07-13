@@ -164,6 +164,7 @@ def create_model( session, actions, batch_size ):
     # Load a previously saved model
     ckpt = tf.train.get_checkpoint_state( train_dir, latest_filename="checkpoint")
     print( "train_dir", train_dir )
+    print(ckpt)
 
     if ckpt and ckpt.model_checkpoint_path:
         # Check if the specific checkpoint exists
@@ -496,6 +497,17 @@ def sample():
                 dp = 1.0
                 _, _, poses3d = model.step(sess, enc_in[bidx], dec_out[bidx], dp, isTraining=False)
 
+                # # To recover a sample to verify thah the new model in tf2 has the same output
+                # with open('realin.npy', 'wb') as f:
+                #     np.save(f, enc_in[bidx])
+                #     # print('saved realin')
+                # with open('realout.npy', 'wb') as f:
+                #     np.save(f, dec_out[bidx])
+                #     # print('saved realout')
+                # with open('pred.npy', 'wb') as f:
+                #     np.save(f, poses3d)
+                #     # print('saved pred')
+
                 # denormalize
                 enc_in[bidx]  = data_utils.unNormalizeData(  enc_in[bidx], data_mean_2d, data_std_2d, dim_to_ignore_2d )
                 dec_out[bidx] = data_utils.unNormalizeData( dec_out[bidx], data_mean_3d, data_std_3d, dim_to_ignore_3d )
@@ -532,6 +544,32 @@ def sample():
                 # Apply inverse rotation and translation
                 dec_out = cam2world_centered(dec_out)
                 poses3d = cam2world_centered(poses3d)
+
+        # code atacched to recover the weights and use to build a model in tf2
+
+        # print("===>asd")
+        # tvars = tf.trainable_variables()
+        # tvars_vals = sess.run(tvars)
+
+        # for idx, (var, val) in enumerate(zip(tvars, tvars_vals)):
+        #     print(var.name, val)  # Prints the name of the variable alongside its value.
+        #     with open('pretrained_models/4874200/%04d - %s.npy' % (idx, var.name.replace('/', '-')), 'wb') as f:
+        #         np.save(f, val)
+
+
+        # print("===> global", flush=True)
+
+        # # tvars = tf.all_variables()
+        # tvars = tf.global_variables()
+        # tvars_vals = sess.run(tvars)
+        # for idx, (var, val) in enumerate(zip(tvars, tvars_vals)):
+        #     print(var.name, val)  # Prints the name of the variable alongside its value.
+        #     with open('pretrained_models/4874200_all/%04d - %s.npy' % (idx, var.name.replace('/', '-')), 'wb') as f:
+        #         np.save(f, val)
+
+
+        # print("===>asd", flush=True)
+
 
     # Grab a random batch to visualize
     enc_in, dec_out, poses3d = map( np.vstack, [enc_in, dec_out, poses3d] )
@@ -573,11 +611,13 @@ def sample():
 
     plt.show()
 
+
 def main():
     if FLAGS.sample:
         sample()
     else:
         train()
+
 
 if __name__ == "__main__":
     main()
