@@ -1,5 +1,6 @@
 """ Losses module """
 
+import numpy as np
 import tensorflow as tf
 
 from top_vae_3d_pose.args_def import ENVIRON as ENV
@@ -72,3 +73,15 @@ class ELBO():
             return mae_loss, mae_loss_noised
 
         raise Exception('Invalid Loss Function: %s' % ENV.FLAGS.f_loss)
+
+
+    @classmethod
+    def compute_loss_3d_vs_vae(cls, real_out, out_3d, out_vae):
+        # real_out = np.array(real_out)
+        # tf.print(real_out.shape)
+        # tf.print(out_3d.shape)
+        # tf.print(out_vae.shape)
+        # print("\n", flush=True)
+        loss1 = tf.reduce_mean(tf.math.square(real_out - out_3d))
+        loss2 = tf.reduce_mean(tf.math.square(real_out - out_vae))
+        return loss1, loss2

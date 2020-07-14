@@ -475,3 +475,20 @@ class PoseBase(tf.keras.Model):
         y_out = tf.matmul(y_out, w4) + self.b4
 
         return y_out
+
+
+
+class Pose3DVae(keras.Model):
+    def __init__(self, latent_dim=35,
+                       inter_dim=[43, 38],
+                       apply_tanh=False):
+        super(Pose3DVae, self).__init__()
+
+        self.pose3d = PoseBase()
+        self.vae = VAE(48, latent_dim, inter_dim)
+
+
+    def call(self, input, training=True):
+        out1 = self.pose3d(input, training=training)
+        out2 = self.vae(out1, training=training)
+        return out1, out2

@@ -16,6 +16,7 @@ import copy
 # from absl import flags
 import argparse
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 # from six.moves import xrange  # pylint: disable=redefined-builtin
@@ -27,7 +28,9 @@ import cameras
 import data_utils
 # import linear_model
 
-from top_vae_3d_pose import models
+from top_vae_3d_pose import models, losses
+
+matplotlib.use('TkAgg')
 
 parser = argparse.ArgumentParser()
 
@@ -157,13 +160,26 @@ def sample():
 
 
     # model = models.Pose3DBase(1024, 2, 0.5, residual=True, batch_norm=True, predict_14=False)
-    model = models.PoseBase()
+    # model = models.PoseBase()
+
+
+    model = models.Pose3DVae()
+
     #dummy input for creation for bach normlaization weigths
     ainput = np.ones((10, 32), dtype=np.float32)
     model(ainput, training=False)
 
-    model.load_weights('pretrained_models/4874200_PoseBase/PoseBase')
-    print("Model loaded")
+
+    model.pose3d.load_weights('pretrained_models/4874200_PoseBase/PoseBase')
+    print("Model loaded 3dpose")
+    model.vae.load_weights('experiments/vae/first-100/last_model_weights')
+    # model.vae.load_weights('experiments/vae/next-50a/last_model_weights')
+    # model.vae.load_weights('experiments/vae/next-50b/last_model_weights')
+
+    # loss_3d = tf.keras.metrics.Mean()
+    # loss_vae = tf.keras.metrics.Mean()
+    loss_3d = tf.keras.metrics.Sum()
+    loss_vae = tf.keras.metrics.Sum()
 
     for key2d in test_set_2d.keys():
 
@@ -184,22 +200,41 @@ def sample():
         enc_in   = np.array_split( enc_in,  n2d // batch_size )
         dec_out  = np.array_split( dec_out, n3d // batch_size )
         all_poses_3d = []
+        all_poses_3d_vae = []
+
+        loss_3d_sa = tf.keras.metrics.Mean()
+        loss_vae_sa = tf.keras.metrics.Mean()
 
         for bidx in range( len(enc_in) ):
 
             # Dropout probability 0 (keep probability 1) for sampling
             dp = 1.0
             # _, _, poses3d = model.step(sess, enc_in[bidx], dec_out[bidx], dp, isTraining=False)
-            poses3d = model(enc_in[bidx], training=False)
+            out_3d, out_vae = model(enc_in[bidx], training=False)
+
+            err3d, errvae = losses.ELBO.compute_loss_3d_vs_vae(dec_out[bidx], out_3d, out_vae)
+
+            loss_3d_sa(err3d)
+            loss_vae_sa(errvae)
+
+            poses3d = out_3d
+            poses3d_vae = out_vae
 
             # denormalize
-            enc_in[bidx]  = data_utils.unNormalizeData(  enc_in[bidx], data_mean_2d, data_std_2d, dim_to_ignore_2d )
-            dec_out[bidx] = data_utils.unNormalizeData( dec_out[bidx], data_mean_3d, data_std_3d, dim_to_ignore_3d )
-            poses3d = data_utils.unNormalizeData( poses3d, data_mean_3d, data_std_3d, dim_to_ignore_3d )
-            all_poses_3d.append( poses3d )
+            enc_in[bidx]  = data_utils.unNormalizeData(enc_in[bidx], data_mean_2d, data_std_2d, dim_to_ignore_2d)
+            dec_out[bidx] = data_utils.unNormalizeData(dec_out[bidx], data_mean_3d, data_std_3d, dim_to_ignore_3d)
+            poses3d = data_utils.unNormalizeData(poses3d, data_mean_3d, data_std_3d, dim_to_ignore_3d)
+            poses3d_vae = data_utils.unNormalizeData(poses3d_vae, data_mean_3d, data_std_3d, dim_to_ignore_3d)
+            all_poses_3d.append(poses3d)
+            all_poses_3d_vae.append(poses3d_vae)
+
+        tf.print("  Error 3d:", loss_3d_sa.result(), "Error vae:", loss_vae_sa.result())
+
+        loss_3d(loss_3d_sa.result())
+        loss_vae(loss_vae_sa.result())
 
         # Put all the poses together
-        enc_in, dec_out, poses3d = map( np.vstack, [enc_in, dec_out, all_poses_3d] )
+        enc_in, dec_out, poses3d, poses3d_vae = map( np.vstack, [enc_in, dec_out, all_poses_3d, all_poses_3d_vae] )
 
         # Convert back to world coordinates
         if FLAGS.camera_frame:
@@ -228,17 +263,20 @@ def sample():
             # Apply inverse rotation and translation
             dec_out = cam2world_centered(dec_out)
             poses3d = cam2world_centered(poses3d)
+            poses3d_vae = cam2world_centered(poses3d_vae)
 
-    print("\ntrainable")
-    print(model.trainable_variables)
-    print("Non trainable")
-    print(model.non_trainable_variables)
-    print("\n", flush=True)
+    tf.print("Test Error 3d:", loss_3d.result(), "Test Error vae:", loss_vae.result())
+
+    # print("\ntrainable")
+    # print(model.trainable_variables)
+    # print("Non trainable")
+    # print(model.non_trainable_variables)
+    # print("\n", flush=True)
 
     # Grab a random batch to visualize
-    enc_in, dec_out, poses3d = map( np.vstack, [enc_in, dec_out, poses3d] )
+    enc_in, dec_out, poses3d, poses3d_vae = map( np.vstack, [enc_in, dec_out, poses3d, poses3d_vae] )
     idx = np.random.permutation( enc_in.shape[0] )
-    enc_in, dec_out, poses3d = enc_in[idx, :], dec_out[idx, :], poses3d[idx, :]
+    enc_in, dec_out, poses3d, poses3d_vae = enc_in[idx, :], dec_out[idx, :], poses3d[idx, :], poses3d_vae[idx, :]
 
     # Visualize random samples
     import matplotlib.gridspec as gridspec
@@ -246,7 +284,7 @@ def sample():
     # 1080p	= 1,920 x 1,080
     fig = plt.figure( figsize=(19.2, 10.8) )
 
-    gs1 = gridspec.GridSpec(5, 9) # 5 rows, 9 columns
+    gs1 = gridspec.GridSpec(5, 12) # 5 rows, 9 columns
     gs1.update(wspace=-0.00, hspace=0.05) # set the spacing between axes.
     plt.axis('off')
 
@@ -270,10 +308,19 @@ def sample():
         p3d = poses3d[exidx,:]
         viz.show3Dpose( p3d, ax3, lcolor="#9b59b6", rcolor="#2ecc71" )
 
-        exidx = exidx + 1
-        subplot_idx = subplot_idx + 3
+        # Plot 3d predictions + vae
+        ax3 = plt.subplot(gs1[subplot_idx+2], projection='3d')
+        p3d = poses3d_vae[exidx,:]
+        viz.show3Dpose( p3d, ax3, lcolor="#9b59b6", rcolor="#2ecc71" )
 
-    plt.show()
+        exidx = exidx + 1
+        subplot_idx = subplot_idx + 4
+
+    plt.savefig('out.png')
+    print("Saved samples on: %s" % 'out.png')
+
+    # plt.show()
+    plt.close()
 
 
 def main():

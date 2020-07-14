@@ -13,6 +13,7 @@ import viz
 from top_vae_3d_pose.args_def import ENVIRON as ENV
 
 matplotlib.use('Agg')
+# matplotlib.use('TkAgg')
 
 
 def gen_sample_img(real_points, noised_points, mean, std, dim_ignored, max_factor, model=None, idx=None):
@@ -92,6 +93,7 @@ def gen_sample_img(real_points, noised_points, mean, std, dim_ignored, max_facto
         file_name = "imgs/vae/%s.png" % datetime.utcnow().isoformat()
     plt.savefig(file_name)
     print("Saved samples on: %s" % file_name)
+    # plt.show()
     plt.close()
 
 
