@@ -52,8 +52,6 @@ class __ENV():
                             help="std for noise to add to truth 3d points")
         parser.add_argument("--f_loss", type=str, default="mse",
                             help="Loss use in ELBO function [mae, mse]")
-        parser.add_argument("--apply_tanh", action='store_true', default=False,
-                            help="Apply sigmoid activation to the decoder output")
         parser.add_argument("--likelihood_factor", type=float, default=10,
                             help="Term to regularize the likelihood loss for ELBO")
 

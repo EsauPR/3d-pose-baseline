@@ -1,164 +1,81 @@
-from collections import namedtuple
-from datetime import datetime
+""" Module to load and handle the train and test data """
 
-import matplotlib
-import matplotlib.gridspec as gridspec
-import matplotlib.pyplot as plt
+from collections import namedtuple
+
 import numpy as np
 import tensorflow as tf
 
 import cameras
 import data_utils
-import viz
 from top_vae_3d_pose.args_def import ENVIRON as ENV
 
-matplotlib.use('Agg')
-# matplotlib.use('TkAgg')
 
-
-def gen_sample_img(real_points, noised_points, mean, std, dim_ignored, max_factor, model=None, idx=None):
-    """ Plot 3d poses, real, with noise and decode from vae model if a model is provided
-        pass 'idx' to select samples otherwise idx will be randomly generated
-    """
-    # select random samples
-    nsamples = 9
-    if idx is None:
-        idx = np.random.choice(real_points.shape[0], nsamples, replace=False)
-    real_points = real_points[idx, :]
-    noised_points = noised_points[idx, :]
-
-    # Use the model to generate new samples or use the noised samples provided
-    if model is not None:
-        z = model.reparametrize(*model.encode(noised_points))
-        if ENV.FLAGS.f_loss == 'xent':
-            pred_points = model.decode(z).numpy()
-        else:
-            pred_points = model.decode(z).numpy()
-
-    real_points *= max_factor
-    noised_points *= max_factor
-
-    # unnormalioze data
-    real_points = data_utils.unNormalizeData(real_points, mean, std, dim_ignored)
-    noised_points = data_utils.unNormalizeData(noised_points, mean, std, dim_ignored)
-    if model is not None:
-        pred_points = data_utils.unNormalizeData(pred_points, mean, std, dim_ignored)
-
-    # def cam2world_centered(data_3d_camframe):
-    #     data_3d_worldframe = cameras.camera_to_world_frame(data_3d_camframe.reshape((-1, 3)), R, T)
-    #     data_3d_worldframe = data_3d_worldframe.reshape((-1, N_JOINTS_H36M*3))
-    #     # subtract root translation
-    #     return data_3d_worldframe - np.tile( data_3d_worldframe[:,:3], (1,N_JOINTS_H36M) )
-    # poses3d = cam2world_centered(poses3d)
-
-    # Make athe plot and save the fig
-    fig = plt.figure(figsize=(19.2, 10.8))
-    # fig = plt.figure(figsize=(10.24, 7.48))
-    if model is None:
-        gs1 = gridspec.GridSpec(3, 6) # 5 rows, 9 columns
-    else:
-        gs1 = gridspec.GridSpec(3, 9) # 5 rows, 9 columns
-    gs1.update(wspace=-0.00, hspace=0.05) # set the spacing between axes.
-    plt.axis('off')
-
-    subplot_idx, exidx = 1, 1
-    for _ in np.arange(nsamples):
-        # Plot 3d predictions
-        ax3 = plt.subplot(gs1[subplot_idx-1], projection='3d')
-        p3d = real_points[exidx-1, :]
-        # print('3D points', p3d)
-        viz.show3Dpose(p3d, ax3, lcolor="#9b59b6", rcolor="#2ecc71" )
-
-        ax3 = plt.subplot(gs1[subplot_idx], projection='3d')
-        p3d = noised_points[exidx-1, :]
-        # print('3D points', p3d)
-        viz.show3Dpose(p3d, ax3, lcolor="#9b59b6", rcolor="#2ecc71" )
-
-        if model is not None:
-            ax3 = plt.subplot(gs1[subplot_idx+1], projection='3d')
-            p3d = pred_points[exidx-1, :]
-            # print('3D points', p3d)
-            viz.show3Dpose(p3d, ax3, lcolor="#9b59b6", rcolor="#2ecc71" )
-
-        exidx = exidx + 1
-        if model is None:
-            subplot_idx = subplot_idx + 2
-        else:
-            subplot_idx = subplot_idx + 3
-
-    # plt.show()
-    if ENV.FLAGS.noised_sample:
-        file_name = "imgs/vae/noised_%f_%f.png" % (ENV.FLAGS.noise_3d[0], ENV.FLAGS.noise_3d[1])
-    else:
-        file_name = "imgs/vae/%s.png" % datetime.utcnow().isoformat()
-    plt.savefig(file_name)
-    print("Saved samples on: %s" % file_name)
-    # plt.show()
-    plt.close()
-
-
-def plot_history(train_loss, test_loss, error_pred, error_noised):
-    x_data = np.arange(len(train_loss)) + 1
-
-    plt.figure(figsize=(12, 6))
-    plt.plot(x_data, train_loss)
-    plt.plot(x_data, test_loss)
-    plt.xlabel('epoch')
-    plt.ylabel('loss')
-    plt.legend(["Train loss", "Test loss"])
-    plt.savefig('imgs/vae/0_loss.png')
-    plt.close()
-
-    plt.figure(figsize=(12, 6))
-    plt.plot(x_data, error_pred)
-    plt.plot(x_data, error_noised)
-    plt.xlabel('epoch')
-    plt.ylabel('error')
-    plt.legend(["Error pred", "Error noised"])
-    plt.savefig('imgs/vae/0_error.png')
-    plt.close()
-
-
-def load_3d_data():
-    """ Read the 3d points from h3m return the train and test points """
+def get_data_params():
+    """ Returns the actions, subjects and cams used """
     actions = data_utils.define_actions(ENV.FLAGS.action)
-
     # Load camera parameters
     subjects_ids = [1, 5, 6, 7, 8, 9, 11]
     rcams = cameras.load_cameras(ENV.FLAGS.cameras_path, subjects_ids)
 
-    # Load 3d data and load (or create) 2d projections
+    return actions, subjects_ids, rcams
+
+
+def load_3d_data_raw():
+    """ Returns the 3d data """
+    actions, _, rcams = get_data_params()
+    return  data_utils.read_3d_data(actions,
+                                    ENV.FLAGS.data_dir,
+                                    ENV.FLAGS.camera_frame,
+                                    rcams,
+                                    ENV.FLAGS.predict_14)
+
+
+def load_2d_data_raw():
+    """ Returns the 2d data """
+    actions, _, rcams = get_data_params()
+    if ENV.FLAGS.use_sh:
+        return data_utils.read_2d_predictions(actions, ENV.FLAGS.data_dir)
+    return data_utils.create_2d_data(actions, ENV.FLAGS.data_dir, rcams)
+
+
+def join_data(train, test, order_keys_train, order_keys_test):
+    """ Join the data in the order given by order_keys_train and order_keys_test """
+    # Join all the data over all the actions
+    train = np.concatenate([train[key] for key in order_keys_train], axis=0).astype('float32')
+    test = np.concatenate([test[key] for key in order_keys_test], axis=0).astype('float32')
+
+    # Join Train an test
+    return np.concatenate([train, test], axis=0)
+
+
+def suffle_and_split(data, suffle_idx, train_size=400000):
+    """ Suffle the data and split in train and test """
+    data = data[suffle_idx, :]
+    train = data[:train_size, :]
+    test = data[train_size:, :]
+    return train, test
+
+
+
+def load_3d_data():
+    """ Read the 3d points from h3m return the train and test points """
     train_set_3d, test_set_3d, \
     data_mean_3d, data_std_3d, \
     dim_to_ignore_3d, dim_to_use_3d, \
-    _, _ = data_utils.read_3d_data(actions,
-                                ENV.FLAGS.data_dir,
-                                ENV.FLAGS.camera_frame,
-                                rcams,
-                                ENV.FLAGS.predict_14)
+    _, _ = load_3d_data_raw()
 
     # Join all the data over all the actions
-    train_set_3d = np.concatenate([item for item in train_set_3d.values()], axis=0).astype('float32')
-    test_set_3d = np.concatenate([item for item in test_set_3d.values()], axis=0).astype('float32')
+    train_keys = list(train_set_3d.keys())
+    test_keys = list(test_set_3d.keys())
+    all_set = join_data(train_set_3d, test_set_3d, train_keys, test_keys)
 
-    # Join Train an test and suffle it
-    all_set = np.concatenate([train_set_3d, test_set_3d], axis=0)
+    # pylint: disable=E1136  # pylint/issues/3139
+    idx = np.random.choice(all_set.shape[0], all_set.shape[0], replace=False)
+    train_set_3d, test_set_3d = suffle_and_split(all_set, idx)
 
-    max_factor = np.max(np.abs(all_set)) if ENV.FLAGS.apply_tanh else 1.0
-    all_set /= max_factor
+    Metadata = namedtuple("Metadata", "mean std dim_ignored dim_used")
+    meta = Metadata(data_mean_3d, data_std_3d, dim_to_ignore_3d, dim_to_use_3d)
 
-    print('mean:', np.mean(all_set))
-    print('std:', np.std(all_set))
-    print('max:', np.max(all_set))
-    print('min:', np.min(all_set))
-
-    np.random.shuffle(all_set)
-    # 400,000 samples for train and the remaining samples for train
-    train_set_3d = all_set[:400000, :]
-    test_set_3d = all_set[400000:, :]
-
-    Metadata = namedtuple("Metadata", "mean std dim_ignored dim_used max_factor")
-    meta = Metadata(data_mean_3d, data_std_3d, dim_to_ignore_3d, dim_to_use_3d, max_factor)
     train = Dataset(train_set_3d,
                    batch_size=ENV.FLAGS.batch_size,
                    shuffle=True,
@@ -171,8 +88,11 @@ def load_3d_data():
     return train, test
 
 
+
 class Dataset(tf.keras.utils.Sequence):
-    """ Dataset """
+    """ Dataset used to train only VAE model
+        The input data are the 3d points and a gaussian noise is added to this
+    """
     def __init__(self, data, batch_size=64, shuffle=True, metadata=None):
         self.data = data
         self.metadata = metadata
@@ -248,3 +168,121 @@ class Dataset(tf.keras.utils.Sequence):
             self.data_noised[i][jid] += noise_single_joint[i][0]
             self.data_noised[i][jid + 1] += noise_single_joint[i][1]
             self.data_noised[i][jid + 2] += noise_single_joint[i][2]
+
+
+
+
+def get_key3d(key2d):
+    """ Returns the key for 3d dataset using the 2d key """
+    camera_frame = ENV.FLAGS.camera_frame
+    (subj, b, fname) = key2d
+    # keys should be the same if 3d is in camera coordinates
+    key3d = key2d if (camera_frame) else (subj, b, '{0}.h5'.format(fname.split('.')[0]))
+    key3d = (subj, b, fname[:-3]) if fname.endswith('-sh') and camera_frame else key3d
+    return key3d
+
+
+def load_2d_3d_data():
+    """ Load the 2d and 3d data and returns two datasets for train and test """
+    train_set_2d, test_set_2d, \
+    data_mean_2d, data_std_2d, \
+    dim_to_ignore_2d, dim_to_use_2d = load_2d_data_raw()
+
+    train_set_3d, test_set_3d, \
+    data_mean_3d, data_std_3d, \
+    dim_to_ignore_3d, dim_to_use_3d, \
+    train_root_positions, test_root_positions = load_3d_data_raw()
+
+    # Get the keys for 2d points
+    keys_2d_train = list(train_set_2d.keys())
+    keys_2d_test = list(test_set_2d.keys())
+    # join the train and test
+    all_set = join_data(train_set_2d, test_set_2d, keys_2d_train, keys_2d_test)
+    # shuffle and split
+    # pylint: disable=E1136  # pylint/issues/3139
+    idx = np.random.choice(all_set.shape[0], all_set.shape[0], replace=False)
+    train_set_2d, test_set_2d = suffle_and_split(all_set, idx)
+
+    # Get the keys for 3d points in the same order of the 2d keys
+    keys_3d_train = [get_key3d(key2d) for key2d in keys_2d_train]
+    keys_3d_test = [get_key3d(key2d) for key2d in keys_2d_test]
+    # join the train and test
+    all_set = join_data(train_set_3d, test_set_3d, keys_3d_train, keys_3d_test)
+    # shuffle and split with same 'idx'
+    train_set_3d, test_set_3d = suffle_and_split(all_set, idx)
+
+    # apply the same operations to root positions with the same order
+    # join the train and test
+    all_set = join_data(train_root_positions, test_root_positions, keys_3d_train, keys_3d_test)
+    # shuffle and split with same 'idx'
+    train_root_positions, test_root_positions = suffle_and_split(all_set, idx)
+
+    # Create Objects from Dataset_2D_3D
+    meta2d = Dataset2D3D.Metadata(data_mean_2d, data_std_2d,
+                                  dim_to_ignore_2d, dim_to_use_2d,
+                                  None)
+    meta3d_train = Dataset2D3D.Metadata(data_mean_3d, data_std_3d,
+                                        dim_to_ignore_3d, dim_to_use_3d,
+                                        train_root_positions)
+    meta3d_test = Dataset2D3D.Metadata(data_mean_3d, data_std_3d,
+                                       dim_to_ignore_3d, dim_to_use_3d,
+                                       test_root_positions)
+
+
+    train = Dataset2D3D(train_set_2d, train_set_3d,
+                        meta2d, meta3d_train,
+                        batch_size=ENV.FLAGS.batch_size, shuffle=True)
+    test = Dataset2D3D(test_set_2d, test_set_3d,
+                       meta2d, meta3d_test,
+                       batch_size=ENV.FLAGS.batch_size, shuffle=True)
+
+    return train, test
+
+
+
+class Dataset2D3D(tf.keras.utils.Sequence):
+    """ Dataset used to train 3D_Pose + Vae model """
+    Metadata = namedtuple("Metadata", "mean std dim_ignored dim_used root_positions")
+
+    def __init__(self, x_data, y_data, x_metadata, y_metadata, batch_size=64, shuffle=True):
+        self.x_data = x_data
+        self.y_data = y_data
+        self.x_metadata = x_metadata
+        self.y_metadata = y_metadata
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+
+        self.batch_step = 0
+        self.batch_idx = None
+        self.indexes = np.arange(self.x_data.shape[0])
+
+
+    def __len__(self):
+        'Denotes the number of batches per epoch'
+        return int(np.floor(self.x_data.shape[0] / self.batch_size))
+
+
+    def __getitem__(self, index):
+        'Generate one batch of data'
+        # Generate indexes of the batch
+        self.batch_idx = self.indexes[index*self.batch_size : (index+1)*self.batch_size]
+        return self.x_data[self.batch_idx, :], self.y_data[self.batch_idx, :]
+
+
+    def __iter__(self):
+        return self
+
+
+    def __next__(self):
+        if self.batch_step == self.__len__():
+            raise StopIteration()
+        batch = self.__getitem__(self.batch_step)
+        self.batch_step += 1
+        return batch
+
+
+    def on_epoch_end(self):
+        """ Updates order indexes used for suffle after each epoch """
+        self.batch_step = 0
+        if self.shuffle is True:
+            np.random.shuffle(self.indexes)
