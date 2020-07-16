@@ -11,6 +11,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 
+from tqdm import tqdm
+
+import cameras
 import data_utils
 import viz
 from top_vae_3d_pose import data_handler, losses, models
@@ -20,80 +23,114 @@ matplotlib.use('Agg')
 # matplotlib.use('TkAgg')
 
 
-def gen_sample_img(real_points, noised_points, mean, std, dim_ignored, model=None, idx=None):
+def to_world(points_3d, key2d, root_pos):
+    _, _, rcams = data_handler.get_data_params()
+    N_CAMERAS = 4
+    N_JOINTS_H36M = 32
+
+    # Add global position back
+    points_3d = points_3d + np.tile(root_pos, [1,N_JOINTS_H36M])
+
+    # Load the appropriate camera
+    key3d = data_handler.get_key3d(key2d)
+    subj, _, sname = key3d
+    subj = int(subj)
+
+    cname = sname.split('.')[1] # <-- camera name
+    scams = {(subj,c+1): rcams[(subj,c+1)] for c in range(N_CAMERAS)} # cams of this subject
+    scam_idx = [scams[(subj,c+1)][-1] for c in range(N_CAMERAS)].index(cname) # index of camera used
+    the_cam  = scams[(subj, scam_idx+1)] # <-- the camera used
+    R, T, f, c, k, p, name = the_cam
+    assert name == cname
+
+    def cam2world_centered(data_3d_camframe):
+        data_3d_worldframe = cameras.camera_to_world_frame(data_3d_camframe.reshape((-1, 3)), R, T)
+        data_3d_worldframe = data_3d_worldframe.reshape((-1, N_JOINTS_H36M*3))
+        # subtract root translation
+        return data_3d_worldframe - np.tile( data_3d_worldframe[:,:3], (1,N_JOINTS_H36M) )
+
+    # Apply inverse rotation and translation
+    return cam2world_centered(points_3d)
+
+
+
+def gen_sample_img(dataset, model=None, idx=None):
     """ Plot 3d poses, real, with noise and decode from vae model if a model is provided
         pass 'idx' to select samples otherwise idx will be randomly generated
     """
     # select random samples
-    nsamples = 9
+    nsamples = 15
     if idx is None:
-        idx = np.random.choice(real_points.shape[0], nsamples, replace=False)
-    real_points = real_points[idx, :]
-    noised_points = noised_points[idx, :]
+        idx = np.random.choice(dataset.x_data.shape[0], nsamples, replace=False)
 
-    # Use the model to generate new samples or use the noised samples provided
-    if model is not None:
-        z = model.reparametrize(*model.encode(noised_points))
-        if ENV.FLAGS.f_loss == 'xent':
-            pred_points = model.decode(z).numpy()
-        else:
-            pred_points = model.decode(z).numpy()
-
+    points_2d = dataset.x_data[idx, :]
+    points_3d = dataset.y_data[idx, :]
+    out_3d, out_3d_vae = model(points_2d, training=False)
 
     # unnormalioze data
-    real_points = data_utils.unNormalizeData(real_points, mean, std, dim_ignored)
-    noised_points = data_utils.unNormalizeData(noised_points, mean, std, dim_ignored)
-    if model is not None:
-        pred_points = data_utils.unNormalizeData(pred_points, mean, std, dim_ignored)
+    points_2d = data_utils.unNormalizeData(points_2d, dataset.x_metadata.mean, dataset.x_metadata.std, dataset.x_metadata.dim_ignored)
+    points_3d = data_utils.unNormalizeData(points_3d, dataset.y_metadata.mean, dataset.y_metadata.std, dataset.y_metadata.dim_ignored)
+    out_3d = data_utils.unNormalizeData(out_3d, dataset.y_metadata.mean, dataset.y_metadata.std, dataset.y_metadata.dim_ignored)
+    out_3d_vae = data_utils.unNormalizeData(out_3d_vae, dataset.y_metadata.mean, dataset.y_metadata.std, dataset.y_metadata.dim_ignored)
 
-    # Make athe plot and save the fig
+    if ENV.FLAGS.camera_frame:
+        keys2d = dataset.mapkeys[idx, :]
+        root_pos = dataset.y_metadata.root_positions[idx, :]
+
+        points_3d = np.array([to_world(p3d.reshape((1, -1)),
+                                       keys2d[i],
+                                       root_pos[i].reshape((1, 3)))[0]
+                              for i, p3d in enumerate(points_3d)])
+        out_3d = np.array([to_world(p3d.reshape((1, -1)), keys2d[i],
+                                    root_pos[i].reshape((1, 3)))[0]
+                              for i, p3d in enumerate(out_3d)])
+        out_3d_vae = np.array([to_world(p3d.reshape((1, -1)), keys2d[i],
+                                        root_pos[i].reshape((1, 3)))[0]
+                              for i, p3d in  enumerate(out_3d_vae)])
+
+    # 1080p	= 1,920 x 1,080
     fig = plt.figure(figsize=(19.2, 10.8))
-    # fig = plt.figure(figsize=(10.24, 7.48))
-    if model is None:
-        gs1 = gridspec.GridSpec(3, 6) # 5 rows, 9 columns
-    else:
-        gs1 = gridspec.GridSpec(3, 9) # 5 rows, 9 columns
+
+    gs1 = gridspec.GridSpec(5, 12) # 5 rows, 9 columns
     gs1.update(wspace=-0.00, hspace=0.05) # set the spacing between axes.
     plt.axis('off')
 
-    subplot_idx, exidx = 1, 1
+    subplot_idx, exidx = 1, 0
     for _ in np.arange(nsamples):
+
+        # Plot 2d pose
+        ax1 = plt.subplot(gs1[subplot_idx-1])
+        p2d = points_2d[exidx, :]
+        viz.show2Dpose(p2d, ax1)
+        ax1.invert_yaxis()
+
+        # Plot 3d gt
+        ax2 = plt.subplot(gs1[subplot_idx], projection='3d')
+        p3d = points_3d[exidx, :]
+        viz.show3Dpose(p3d, ax2)
+
         # Plot 3d predictions
-        ax3 = plt.subplot(gs1[subplot_idx-1], projection='3d')
-        p3d = real_points[exidx-1, :]
-        # print('3D points', p3d)
+        ax3 = plt.subplot(gs1[subplot_idx+1], projection='3d')
+        p3d = out_3d[exidx, :]
         viz.show3Dpose(p3d, ax3, lcolor="#9b59b6", rcolor="#2ecc71")
 
-        ax3 = plt.subplot(gs1[subplot_idx], projection='3d')
-        p3d = noised_points[exidx-1, :]
-        # print('3D points', p3d)
-        viz.show3Dpose(p3d, ax3, lcolor="#9b59b6", rcolor="#2ecc71")
-
-        if model is not None:
-            ax3 = plt.subplot(gs1[subplot_idx+1], projection='3d')
-            p3d = pred_points[exidx-1, :]
-            # print('3D points', p3d)
-            viz.show3Dpose(p3d, ax3, lcolor="#9b59b6", rcolor="#2ecc71")
+        # Plot 3d predictions + vae
+        ax4 = plt.subplot(gs1[subplot_idx+2], projection='3d')
+        p3d = out_3d_vae[exidx, :]
+        viz.show3Dpose(p3d, ax4, lcolor="#9b59b6", rcolor="#2ecc71")
 
         exidx = exidx + 1
-        if model is None:
-            subplot_idx = subplot_idx + 2
-        else:
-            subplot_idx = subplot_idx + 3
+        subplot_idx = subplot_idx + 4
 
-    # plt.show()
-    if ENV.FLAGS.noised_sample:
-        file_name = "imgs/vae/noised_%f_%f.png" % (ENV.FLAGS.noise_3d[0], ENV.FLAGS.noise_3d[1])
-    else:
-        file_name = "imgs/vae/%s.png" % datetime.utcnow().isoformat()
+    file_name = "imgs/3d_vae/%s.png" % datetime.utcnow().isoformat()
     plt.savefig(file_name)
     print("Saved samples on: %s" % file_name)
     # plt.show()
     plt.close()
 
 
-def plot_history(train_loss, test_loss, error_pred, error_noised):
-    """ Plot the train vs test loss and prediction error vs noised error through the epochs """
+def plot_history(train_loss, test_loss, error_vae_out, error_3d_out):
+    """ Plot the train vs test loss and vae out vs 3dpose out error through the epochs """
     x_data = np.arange(len(train_loss)) + 1
 
     plt.figure(figsize=(12, 6))
@@ -102,16 +139,16 @@ def plot_history(train_loss, test_loss, error_pred, error_noised):
     plt.xlabel('epoch')
     plt.ylabel('loss')
     plt.legend(["Train loss", "Test loss"])
-    plt.savefig('imgs/vae/0_loss.png')
+    plt.savefig('imgs/3d_vae/0_loss.png')
     plt.close()
 
     plt.figure(figsize=(12, 6))
-    plt.plot(x_data, error_pred)
-    plt.plot(x_data, error_noised)
+    plt.plot(x_data, error_vae_out)
+    plt.plot(x_data, error_3d_out)
     plt.xlabel('epoch')
     plt.ylabel('error')
-    plt.legend(["Error pred", "Error noised"])
-    plt.savefig('imgs/vae/0_error.png')
+    plt.legend(["Error vae_out", "Error 3d_out"])
+    plt.savefig('imgs/3d_vae/0_error.png')
     plt.close()
 
 
@@ -127,112 +164,104 @@ def get_optimizer():
 
 
 @tf.function
-def train_step(model, x_noised, x_truth, optimizer):
+def train_step_vae(model, x_data, y_data, optimizer):
     """ Define a train step """
+    x_out = model.pose3d(x_data, training=False)
     with tf.GradientTape() as tape:
-        loss = losses.ELBO.compute_loss(model, x_noised, x_truth)
-    gradients = tape.gradient(loss, model.trainable_variables)
-    optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+        loss = losses.ELBO.compute_loss(model.vae, x_out, y_data)
+    gradients = tape.gradient(loss, model.vae.trainable_variables)
+    optimizer.apply_gradients(zip(gradients, model.vae.trainable_variables))
     return loss
 
 
 def train():
     """ Train function """
-    data_train, data_test = data_handler.load_3d_data()
+    data_train, data_test = data_handler.load_2d_3d_data()
     print("Dataset dims")
-    print(data_train.data.shape, data_test.data.shape)
+    print(data_train.x_data.shape, data_train.y_data.shape)
+    print(data_test.x_data.shape, data_test.y_data.shape)
 
-    model = models.VAE(data_train.data.shape[1],
-                       latent_dim=ENV.FLAGS.vae_dim[-1],
-                       inter_dim=ENV.FLAGS.vae_dim[:-1],
-                       apply_tanh=ENV.FLAGS.apply_tanh)
+    model = models.Pose3DVae(latent_dim=ENV.FLAGS.vae_dim[-1], inter_dim=ENV.FLAGS.vae_dim[:-1])
+    # Dummy input for creation for bach normlaization weigths
+    ainput = np.ones((10, 32), dtype=np.float32)
+    model(ainput, training=False)
+    # Load weights for 2d to 3d prediction
+    model.pose3d.load_weights('pretrained_models/4874200_PoseBase/PoseBase')
+
     optimizer = get_optimizer()
 
     ckpt = tf.train.Checkpoint(step=tf.Variable(1), optimizer=optimizer, net=model)
-    manager = tf.train.CheckpointManager(ckpt, './experiments/vae/tf_ckpts', max_to_keep=3)
+    manager = tf.train.CheckpointManager(ckpt, './experiments/3d_vae/tf_ckpts', max_to_keep=3)
     ckpt.restore(manager.latest_checkpoint)
     if manager.latest_checkpoint:
         print("Restaurado de {}".format(manager.latest_checkpoint))
     else:
         print("Inicializando desde cero.")
 
-
     # Indexes for sampling
-    idx = np.random.choice(data_test.data.shape[0], 9, replace=False)
+    idx = np.random.choice(data_test.x_data.shape[0], 15, replace=False)
 
     # Logs for errors and losses
-    error_pred_history = []
-    error_noised_history = []
+    error_vae_out_history = []
+    error_3d_out_history = []
     loss_train_history = []
     loss_test_history = []
 
     for epoch in range(1, ENV.FLAGS.epochs + 1):
         print("\nStarting epoch:", epoch)
 
-
         loss_train = tf.keras.metrics.Mean()
-        start_time = time.time()
-        for step, (x_noised, x_truth) in enumerate(data_train):
-            step_loss = train_step(model, x_noised, x_truth, optimizer)
+        # start_time = time.time()
+        for step, (x_train, y_train) in enumerate(tqdm(data_train)):
+            step_loss = train_step_vae(model, x_train, y_train, optimizer)
             loss_train(step_loss)
             if step % ENV.FLAGS.step_log == 0:
-                print("  Training loss at step %d: %.4f" % (step, tf.math.reduce_mean(step_loss)))
-                print("  Seen : %s samples" % ((step + 1) * ENV.FLAGS.batch_size))
-        end_time = time.time()
+                ltp = tf.math.reduce_mean(step_loss)
+                tqdm.write(" Training loss at step %d: %.4f" % (step, ltp))
+                tqdm.write(" Seen : %s samples" % ((step + 1) * ENV.FLAGS.batch_size))
+        # end_time = time.time()
         loss_train_history.append(loss_train.result())
 
+        print("Evaluation on Test data...")
         loss_test = tf.keras.metrics.Mean()
-        error_pred = tf.keras.metrics.Mean()
-        error_noised = tf.keras.metrics.Mean()
-        for x_noised, x_truth in data_test:
-            loss_test(losses.ELBO.compute_loss(model, x_noised, x_truth))
-            err_p, err_n = losses.ELBO.compute_error_real_pred(model, x_noised, x_truth)
-            error_pred(err_p)
-            error_noised(err_n)
+        error_vae_out = tf.keras.metrics.Mean()
+        error_3d_out = tf.keras.metrics.Mean()
+        for x_test, y_test in tqdm(data_test):
+            x_out = model.pose3d(x_test, training=False)
+            loss_test(losses.ELBO.compute_loss(model.vae, x_out, y_test))
+            err_p, err_n = losses.ELBO.compute_error_real_pred(model.vae, x_out, y_test)
+            error_vae_out(err_p)
+            error_3d_out(err_n)
         loss_test_history.append(loss_test.result())
-        error_pred_history.append(error_pred.result())
-        error_noised_history.append(error_noised.result())
-
-        print('Epoch: {}, Test set ELBO: {}, time elapse for current epoch: {}'.format(epoch, loss_test_history[-1], end_time - start_time))
-        tf.print('Error real vs noised:', error_noised_history[-1])
-        tf.print('Error real vs pred:', error_pred_history[-1])
+        error_vae_out_history.append(error_vae_out.result())
+        error_3d_out_history.append(error_3d_out.result())
+        print('Epoch: {}, Test set ELBO: {}'.format(epoch, loss_test_history[-1]))
+        tf.print('Error real vs 3d out:', error_3d_out_history[-1])
+        tf.print('Error real vs vae out:', error_vae_out_history[-1])
         tf.print('\nSaving samples...')
-        gen_sample_img(data_test.data, data_test.data_noised,
-                       data_test.metadata.mean, data_test.metadata.std,
-                       data_test.metadata.dim_ignored,
-                       model=model, idx=idx)
+        gen_sample_img(data_test, model=model, idx=idx)
 
         # Reset data for next epoch
-        data_train.on_epoch_end(new_noise=True)
-        data_test.on_epoch_end(new_noise=True)
+        data_train.on_epoch_end()
+        data_test.on_epoch_end()
 
         ckpt.step.assign_add(1)
         save_path = manager.save()
         print("Checkpoint saved: {}".format(save_path))
 
         plot_history(loss_train_history, loss_test_history,
-                     error_pred_history, error_noised_history)
+                     error_vae_out_history, error_3d_out_history)
 
     # Save the weights of the las model and the config use to run and train
-    model.save_weights('./experiments/vae/last_model_weights')
-    with open('./experiments/vae/train.cfg', 'w') as cfg:
+    model.save_weights('./experiments/3d_vae/last_model_weights')
+    with open('./experiments/3d_vae/train.cfg', 'w') as cfg:
         json.dump(vars(ENV.FLAGS), cfg)
 
 
 
 def main():
-    if ENV.FLAGS.noised_sample:
-        # Generate a sample of data with noise
-
-        data_train, data_test = data_handler.load_3d_data()
-        print("Dataset dims")
-        print(data_train.data.shape, data_test.data.shape)
-
-        gen_sample_img(data_test.data, data_test.data_noised,
-                       data_test.metadata.mean, data_test.metadata.std,
-                       data_test.metadata.dim_ignored,
-                       idx=np.random.choice(data_test.data.shape[0], 9, replace=False))
-    else:
+    """ Main """
+    with tf.device('/device:GPU:%d' % ENV.FLAGS.gpu_device):
         train()
 
 

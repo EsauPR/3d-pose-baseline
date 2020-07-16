@@ -46,6 +46,7 @@ class __ENV():
 
 
         # Training
+        parser.add_argument("--gpu_device", type=int, default=2, help="GPU device number")
         parser.add_argument("--step_log", type=int, default=1000,
                             help="std for noise to add to truth 3d points")
         parser.add_argument("--noise_3d", type=float, nargs='+', default=[1, 1],
@@ -54,6 +55,11 @@ class __ENV():
                             help="Loss use in ELBO function [mae, mse]")
         parser.add_argument("--likelihood_factor", type=float, default=10,
                             help="Term to regularize the likelihood loss for ELBO")
+        parser.add_argument("--max_norm", action='store_true', default=False,
+                            help="Apply maxnorm constraint to the weights")
+        parser.add_argument("--residual", action='store_true', default=False,
+                            help="Whether to add a residual connection every 2 layers")
+
 
 
         # Directories

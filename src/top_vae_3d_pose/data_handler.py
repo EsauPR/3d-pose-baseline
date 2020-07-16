@@ -48,11 +48,12 @@ def join_data(train, test, order_keys_train, order_keys_test):
     return np.concatenate([train, test], axis=0)
 
 
-def suffle_and_split(data, suffle_idx, train_size=400000):
+def suffle_and_split(data, suffle_idx, train_size=0.8):
     """ Suffle the data and split in train and test """
     data = data[suffle_idx, :]
-    train = data[:train_size, :]
-    test = data[train_size:, :]
+    tsize = int(data.shape[0] * train_size)
+    train = data[:tsize, :]
+    test = data[tsize:, :]
     return train, test
 
 
@@ -182,6 +183,22 @@ def get_key3d(key2d):
     return key3d
 
 
+def keys2d_to_list(train_set_2d, test_set_2d):
+    keys_2d_train = list(train_set_2d.keys())
+    keys_2d_test = list(test_set_2d.keys())
+
+    keys = []
+    for key in keys_2d_train:
+        for _ in range(train_set_2d[key].shape[0]):
+            keys.append(key)
+
+    for key in keys_2d_test:
+        for _ in range(test_set_2d[key].shape[0]):
+            keys.append(key)
+
+    return np.array(keys)
+
+
 def load_2d_3d_data():
     """ Load the 2d and 3d data and returns two datasets for train and test """
     train_set_2d, test_set_2d, \
@@ -193,14 +210,18 @@ def load_2d_3d_data():
     dim_to_ignore_3d, dim_to_use_3d, \
     train_root_positions, test_root_positions = load_3d_data_raw()
 
+    all_keys = keys2d_to_list(train_set_2d, test_set_2d)
+    # pylint: disable=E1136  # pylint/issues/3139
+    idx = np.random.choice(all_keys.shape[0], all_keys.shape[0], replace=False)
+    train_keys, test_keys = suffle_and_split(all_keys, idx)
+
+
     # Get the keys for 2d points
     keys_2d_train = list(train_set_2d.keys())
     keys_2d_test = list(test_set_2d.keys())
     # join the train and test
     all_set = join_data(train_set_2d, test_set_2d, keys_2d_train, keys_2d_test)
     # shuffle and split
-    # pylint: disable=E1136  # pylint/issues/3139
-    idx = np.random.choice(all_set.shape[0], all_set.shape[0], replace=False)
     train_set_2d, test_set_2d = suffle_and_split(all_set, idx)
 
     # Get the keys for 3d points in the same order of the 2d keys
@@ -231,9 +252,11 @@ def load_2d_3d_data():
 
     train = Dataset2D3D(train_set_2d, train_set_3d,
                         meta2d, meta3d_train,
+                        train_keys,
                         batch_size=ENV.FLAGS.batch_size, shuffle=True)
     test = Dataset2D3D(test_set_2d, test_set_3d,
                        meta2d, meta3d_test,
+                       test_keys,
                        batch_size=ENV.FLAGS.batch_size, shuffle=True)
 
     return train, test
@@ -244,11 +267,12 @@ class Dataset2D3D(tf.keras.utils.Sequence):
     """ Dataset used to train 3D_Pose + Vae model """
     Metadata = namedtuple("Metadata", "mean std dim_ignored dim_used root_positions")
 
-    def __init__(self, x_data, y_data, x_metadata, y_metadata, batch_size=64, shuffle=True):
+    def __init__(self, x_data, y_data, x_metadata, y_metadata, mapkeys, batch_size=64, shuffle=True):
         self.x_data = x_data
         self.y_data = y_data
         self.x_metadata = x_metadata
         self.y_metadata = y_metadata
+        self.mapkeys = mapkeys
         self.batch_size = batch_size
         self.shuffle = shuffle
 

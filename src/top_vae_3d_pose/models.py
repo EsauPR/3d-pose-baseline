@@ -34,19 +34,15 @@ class VAE(tf.keras.Model):
     def _buil_decoder(self):
         dec_in = keras.Input(shape=(self.latent_dim), name='dec_input')
         dec_f = dec_in
+
         for units in self.inter_dim[::-1]:
             dec_f = keras.layers.Dense(units=units,
                                        activation='relu',
                                        name='dec_f_%d' % units)(dec_f)
-        if self.apply_tanh:
-            dec_out = keras.layers.Dense(units=self.input_size,
-                                        activation='tanh',
-                                        name='dec_f_out'
-                                        )(dec_f)
-        else:
-            dec_out = keras.layers.Dense(units=self.input_size,
-                                        name='dec_f_out'
-                                        )(dec_f)
+
+        dec_out = keras.layers.Dense(units=self.input_size,
+                                    name='dec_f_out'
+                                    )(dec_f)
 
         self.decoder = keras.Model(inputs=dec_in, outputs=dec_out, name='decoder')
         self.decoder.summary()
@@ -479,16 +475,13 @@ class PoseBase(tf.keras.Model):
 
 
 class Pose3DVae(keras.Model):
-    def __init__(self, latent_dim=35,
-                       inter_dim=[43, 38],
-                       apply_tanh=False):
+    def __init__(self, latent_dim, inter_dim):
         super(Pose3DVae, self).__init__()
-
         self.pose3d = PoseBase()
         self.vae = VAE(48, latent_dim, inter_dim)
 
 
-    def call(self, input, training=True):
-        out1 = self.pose3d(input, training=training)
+    def call(self, inputs, training=True):
+        out1 = self.pose3d(inputs, training=training)
         out2 = self.vae(out1, training=training)
         return out1, out2
