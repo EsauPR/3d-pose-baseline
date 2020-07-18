@@ -40,9 +40,7 @@ class VAE(tf.keras.Model):
                                        activation='relu',
                                        name='dec_f_%d' % units)(dec_f)
 
-        dec_out = keras.layers.Dense(units=self.input_size,
-                                    name='dec_f_out'
-                                    )(dec_f)
+        dec_out = keras.layers.Dense(units=self.input_size, name='dec_f_out')(dec_f)
 
         self.decoder = keras.Model(inputs=dec_in, outputs=dec_out, name='decoder')
         self.decoder.summary()
@@ -72,7 +70,7 @@ class VAE(tf.keras.Model):
         return self.decoder(z)
 
 
-    def call(self, inputs):
+    def call(self, inputs, training=False):
         return self.decode(self.reparametrize(*self.encode(inputs)))
 
 
@@ -98,7 +96,7 @@ def kaiming(shape, dtype=tf.float32, partition_info=None):
     Returns
         Tensorflow array with initial weights
     """
-    return(tf.random.truncated_normal(shape, dtype=dtype) * tf.math.sqrt(2/float(shape[0])))
+    return tf.random.truncated_normal(shape, dtype=dtype) * tf.math.sqrt(2/float(shape[0]))
 
 
 class Linear3DBase(tf.keras.layers.Layer):
@@ -173,22 +171,22 @@ class TwoLinear3DBase(tf.keras.layers.Layer):
         super(TwoLinear3DBase, self).__init__()
         self.units = units
         self.dropout_keep_prob = dropout_keep_prob
-        self.max_norm=max_norm
+        self.max_norm = max_norm
         self.residual = residual
 
         with tf.name_scope('two_linear'):
             self.l1 = Linear3DBase(self.units,
-                                self.units,
-                                self.dropout_keep_prob,
-                                max_norm=self.max_norm,
-                                batch_norm=batch_norm,
-                                is_output_layer=False)
+                                   self.units,
+                                   self.dropout_keep_prob,
+                                   max_norm=self.max_norm,
+                                   batch_norm=batch_norm,
+                                   is_output_layer=False)
             self.l2 = Linear3DBase(self.units,
-                                self.units,
-                                self.dropout_keep_prob,
-                                max_norm=self.max_norm,
-                                batch_norm=batch_norm,
-                                is_output_layer=False)
+                                   self.units,
+                                   f.dropout_keep_prob,
+                                   max_norm=self.max_norm,
+                                   batch_norm=batch_norm,
+                                   is_output_layer=False)
 
 
     def call(self, inputs, training=True):
@@ -202,13 +200,14 @@ class TwoLinear3DBase(tf.keras.layers.Layer):
 
 class Pose3DBase(tf.keras.Model):
     """ Updated Model for 3d-pose-baseline """
-    def __init__(self, linear_size,
-                       num_layers,
-                       dropout_keep_prob,
-                       residual=True,
-                       batch_norm=True,
-                       max_norm=True,
-                       predict_14=False):
+    def __init__(self,
+                 linear_size,
+                 num_layers,
+                 dropout_keep_prob,
+                 residual=True,
+                 batch_norm=True,
+                 max_norm=True,
+                 predict_14=False):
         """Creates the linear + relu model
 
         Args
@@ -229,7 +228,7 @@ class Pose3DBase(tf.keras.Model):
         # hourglass detections). We settled with 16 joints in 2d just to make models
         # compatible (e.g. you can train on ground truth 2d and test on SH detections).
         # This does not seem to have an effect on prediction performance.
-        self.HUMAN_2D_SIZE = 16 * 2
+        self.human_2d_size = 16 * 2
 
         # In 3d all the predictions are zero-centered around the root (hip) joint, so
         # we actually predict only 16 joints. The error is still computed over 17 joints,
@@ -237,10 +236,10 @@ class Pose3DBase(tf.keras.Model):
         # hip to account for!
         # There is also an option to predict only 14 joints, which makes our results
         # directly comparable to those in https://arxiv.org/pdf/1611.09010.pdf
-        self.HUMAN_3D_SIZE = 14 * 3 if predict_14 else 16 * 3
+        self.human_3d_size = 14 * 3 if predict_14 else 16 * 3
 
-        self.input_size = self.HUMAN_2D_SIZE
-        self.output_size = self.HUMAN_3D_SIZE
+        self.input_size = self.human_2d_size
+        self.output_size = self.human_3d_size
 
         self.linear_size = linear_size
         self.num_layers = num_layers
@@ -251,7 +250,7 @@ class Pose3DBase(tf.keras.Model):
         self.predict_14 = predict_14
 
         self.lin = Linear3DBase(self.linear_size,
-                                self.HUMAN_2D_SIZE,
+                                self.human_2d_size,
                                 self.dropout_keep_prob,
                                 max_norm=self.max_norm,
                                 is_output_layer=False)
@@ -260,7 +259,7 @@ class Pose3DBase(tf.keras.Model):
                                      self.dropout_keep_prob,
                                      max_norm=self.max_norm,
                                      residual=self.residual) for _ in range(self.num_layers)]
-        self.lout = Linear3DBase(self.HUMAN_3D_SIZE,
+        self.lout = Linear3DBase(self.human_3d_size,
                                  self.linear_size,
                                  self.dropout_keep_prob,
                                  max_norm=self.max_norm,
@@ -475,6 +474,7 @@ class PoseBase(tf.keras.Model):
 
 
 class Pose3DVae(keras.Model):
+    """ Model with the 3dpose prediction + VAE filter """
     def __init__(self, latent_dim, inter_dim):
         super(Pose3DVae, self).__init__()
         self.pose3d = PoseBase()

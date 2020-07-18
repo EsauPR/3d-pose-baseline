@@ -78,9 +78,9 @@ def load_3d_data():
     meta = Metadata(data_mean_3d, data_std_3d, dim_to_ignore_3d, dim_to_use_3d)
 
     train = Dataset(train_set_3d,
-                   batch_size=ENV.FLAGS.batch_size,
-                   shuffle=True,
-                   metadata=meta)
+                    batch_size=ENV.FLAGS.batch_size,
+                    shuffle=True,
+                    metadata=meta)
     test = Dataset(test_set_3d,
                    batch_size=ENV.FLAGS.batch_size,
                    shuffle=True,
@@ -130,7 +130,7 @@ class Dataset(tf.keras.utils.Sequence):
 
 
     def on_epoch_end(self, new_noise=False):
-        'Updates indexes after each epoch'
+        """ Updates indexes after each epoch """
         self.batch_step = 0
         if self.shuffle is True:
             np.random.shuffle(self.indexes)
@@ -149,13 +149,14 @@ class Dataset(tf.keras.utils.Sequence):
         nsamples, points_dim = data.shape
 
         joint_noise_factor = ENV.FLAGS.noise_3d[1]
+        noise = ENV.FLAGS.noise_3d[0]
 
         # gaussian noise
-        noised_all = np.random.randn(nsamples, points_dim) * ENV.FLAGS.noise_3d[0]
+        noised_all = np.random.randn(nsamples, points_dim) * noise
 
         # Select the joint for each sample and add more noise
         joints_idx = np.random.choice(np.arange(points_dim), nsamples)
-        noise_single_joint = np.random.randn(nsamples, 3) * (ENV.FLAGS.noise_3d[0] + joint_noise_factor)
+        noise_single_joint = np.random.randn(nsamples, 3) * (noise + joint_noise_factor)
 
         # Array of probs to add or no noise a any sample
         probs = np.random.randn(nsamples)
@@ -184,6 +185,7 @@ def get_key3d(key2d):
 
 
 def keys2d_to_list(train_set_2d, test_set_2d):
+    """ Repeat each key by the length of the 2d data to match with the same index """
     keys_2d_train = list(train_set_2d.keys())
     keys_2d_test = list(test_set_2d.keys())
 
@@ -267,7 +269,14 @@ class Dataset2D3D(tf.keras.utils.Sequence):
     """ Dataset used to train 3D_Pose + Vae model """
     Metadata = namedtuple("Metadata", "mean std dim_ignored dim_used root_positions")
 
-    def __init__(self, x_data, y_data, x_metadata, y_metadata, mapkeys, batch_size=64, shuffle=True):
+    def __init__(self,
+                 x_data,
+                 y_data,
+                 x_metadata,
+                 y_metadata,
+                 mapkeys,
+                 batch_size=64,
+                 shuffle=True):
         self.x_data = x_data
         self.y_data = y_data
         self.x_metadata = x_metadata
@@ -305,8 +314,10 @@ class Dataset2D3D(tf.keras.utils.Sequence):
         return batch
 
 
-    def on_epoch_end(self):
+    def on_epoch_end(self, avoid_suffle=False):
         """ Updates order indexes used for suffle after each epoch """
         self.batch_step = 0
+        if avoid_suffle:
+            return
         if self.shuffle is True:
             np.random.shuffle(self.indexes)

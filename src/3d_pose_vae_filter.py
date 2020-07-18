@@ -1,8 +1,6 @@
 """ Train a VAE model used to filter and enhance 3d points """
 
-import argparse
 import json
-import time
 from datetime import datetime
 
 import matplotlib
@@ -22,14 +20,17 @@ from top_vae_3d_pose.args_def import ENVIRON as ENV
 matplotlib.use('Agg')
 # matplotlib.use('TkAgg')
 
+tf.debugging.set_log_device_placement(True)
+
 
 def to_world(points_3d, key2d, root_pos):
+    """ Trasform coordenates from camera to world coordenates  """
     _, _, rcams = data_handler.get_data_params()
-    N_CAMERAS = 4
-    N_JOINTS_H36M = 32
+    n_cams = 4
+    n_joints_h36m = 32
 
     # Add global position back
-    points_3d = points_3d + np.tile(root_pos, [1,N_JOINTS_H36M])
+    points_3d = points_3d + np.tile(root_pos, [1, n_joints_h36m])
 
     # Load the appropriate camera
     key3d = data_handler.get_key3d(key2d)
@@ -37,21 +38,20 @@ def to_world(points_3d, key2d, root_pos):
     subj = int(subj)
 
     cname = sname.split('.')[1] # <-- camera name
-    scams = {(subj,c+1): rcams[(subj,c+1)] for c in range(N_CAMERAS)} # cams of this subject
-    scam_idx = [scams[(subj,c+1)][-1] for c in range(N_CAMERAS)].index(cname) # index of camera used
-    the_cam  = scams[(subj, scam_idx+1)] # <-- the camera used
+    scams = {(subj, c+1): rcams[(subj, c+1)] for c in range(n_cams)} # cams of this subject
+    scam_idx = [scams[(subj, c+1)][-1] for c in range(n_cams)].index(cname) # index of camera used
+    the_cam = scams[(subj, scam_idx+1)] # <-- the camera used
     R, T, f, c, k, p, name = the_cam
     assert name == cname
 
     def cam2world_centered(data_3d_camframe):
         data_3d_worldframe = cameras.camera_to_world_frame(data_3d_camframe.reshape((-1, 3)), R, T)
-        data_3d_worldframe = data_3d_worldframe.reshape((-1, N_JOINTS_H36M*3))
+        data_3d_worldframe = data_3d_worldframe.reshape((-1, n_joints_h36m*3))
         # subtract root translation
-        return data_3d_worldframe - np.tile( data_3d_worldframe[:,:3], (1,N_JOINTS_H36M) )
+        return data_3d_worldframe - np.tile(data_3d_worldframe[:, :3], (1, n_joints_h36m))
 
     # Apply inverse rotation and translation
     return cam2world_centered(points_3d)
-
 
 
 def gen_sample_img(dataset, model=None, idx=None):
@@ -68,10 +68,22 @@ def gen_sample_img(dataset, model=None, idx=None):
     out_3d, out_3d_vae = model(points_2d, training=False)
 
     # unnormalioze data
-    points_2d = data_utils.unNormalizeData(points_2d, dataset.x_metadata.mean, dataset.x_metadata.std, dataset.x_metadata.dim_ignored)
-    points_3d = data_utils.unNormalizeData(points_3d, dataset.y_metadata.mean, dataset.y_metadata.std, dataset.y_metadata.dim_ignored)
-    out_3d = data_utils.unNormalizeData(out_3d, dataset.y_metadata.mean, dataset.y_metadata.std, dataset.y_metadata.dim_ignored)
-    out_3d_vae = data_utils.unNormalizeData(out_3d_vae, dataset.y_metadata.mean, dataset.y_metadata.std, dataset.y_metadata.dim_ignored)
+    points_2d = data_utils.unNormalizeData(points_2d,
+                                           dataset.x_metadata.mean,
+                                           dataset.x_metadata.std,
+                                           dataset.x_metadata.dim_ignored)
+    points_3d = data_utils.unNormalizeData(points_3d,
+                                           dataset.y_metadata.mean,
+                                           dataset.y_metadata.std,
+                                           dataset.y_metadata.dim_ignored)
+    out_3d = data_utils.unNormalizeData(out_3d,
+                                        dataset.y_metadata.mean,
+                                        dataset.y_metadata.std,
+                                        dataset.y_metadata.dim_ignored)
+    out_3d_vae = data_utils.unNormalizeData(out_3d_vae,
+                                            dataset.y_metadata.mean,
+                                            dataset.y_metadata.std,
+                                            dataset.y_metadata.dim_ignored)
 
     if ENV.FLAGS.camera_frame:
         keys2d = dataset.mapkeys[idx, :]
@@ -83,10 +95,10 @@ def gen_sample_img(dataset, model=None, idx=None):
                               for i, p3d in enumerate(points_3d)])
         out_3d = np.array([to_world(p3d.reshape((1, -1)), keys2d[i],
                                     root_pos[i].reshape((1, 3)))[0]
-                              for i, p3d in enumerate(out_3d)])
+                           for i, p3d in enumerate(out_3d)])
         out_3d_vae = np.array([to_world(p3d.reshape((1, -1)), keys2d[i],
                                         root_pos[i].reshape((1, 3)))[0]
-                              for i, p3d in  enumerate(out_3d_vae)])
+                               for i, p3d in enumerate(out_3d_vae)])
 
     # 1080p	= 1,920 x 1,080
     fig = plt.figure(figsize=(19.2, 10.8))
@@ -152,6 +164,16 @@ def plot_history(train_loss, test_loss, error_vae_out, error_3d_out):
     plt.close()
 
 
+def save_history(loss_train, loss_test, error_3d_out, error_vae_out):
+    """ Save the error and lost history on files """
+    with open('./experiments/3d_vae/loss_train.npy', 'wb') as f:
+        np.save(f, np.array(loss_train))
+    with open('./experiments/3d_vae/loss_test.npy', 'wb') as f:
+        np.save(f, np.array(loss_test))
+    with open('./experiments/3d_vae/error_3d_out.npy', 'wb') as f:
+        np.save(f, np.array(error_3d_out))
+    with open('./experiments/3d_vae/error_vae_out.npy', 'wb') as f:
+        np.save(f, np.array(error_vae_out))
 
 
 def get_optimizer():
@@ -166,8 +188,8 @@ def get_optimizer():
 @tf.function
 def train_step_vae(model, x_data, y_data, optimizer):
     """ Define a train step """
-    x_out = model.pose3d(x_data, training=False)
     with tf.GradientTape() as tape:
+        x_out = model.pose3d(x_data, training=False)
         loss = losses.ELBO.compute_loss(model.vae, x_out, y_data)
     gradients = tape.gradient(loss, model.vae.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.vae.trainable_variables))
@@ -182,7 +204,7 @@ def train():
     print(data_test.x_data.shape, data_test.y_data.shape)
 
     model = models.Pose3DVae(latent_dim=ENV.FLAGS.vae_dim[-1], inter_dim=ENV.FLAGS.vae_dim[:-1])
-    # Dummy input for creation for bach normlaization weigths
+    # Dummy input for creation for bach normalization weigths
     ainput = np.ones((10, 32), dtype=np.float32)
     model(ainput, training=False)
     # Load weights for 2d to 3d prediction
@@ -197,6 +219,15 @@ def train():
         print("Restaurado de {}".format(manager.latest_checkpoint))
     else:
         print("Inicializando desde cero.")
+
+
+    print("Trainable weights:", len(model.trainable_weights))
+    if ENV.FLAGS.train_all:
+        print("Training all")
+    else:
+        model.pose3d.trainable = False
+        print("Training only VAE weights:", len(model.trainable_weights))
+
 
     # Indexes for sampling
     idx = np.random.choice(data_test.x_data.shape[0], 15, replace=False)
@@ -243,7 +274,7 @@ def train():
 
         # Reset data for next epoch
         data_train.on_epoch_end()
-        data_test.on_epoch_end()
+        data_test.on_epoch_end(avoid_suffle=True)
 
         ckpt.step.assign_add(1)
         save_path = manager.save()
@@ -256,6 +287,8 @@ def train():
     model.save_weights('./experiments/3d_vae/last_model_weights')
     with open('./experiments/3d_vae/train.cfg', 'w') as cfg:
         json.dump(vars(ENV.FLAGS), cfg)
+
+    save_history(loss_train_history, loss_test_history, error_3d_out_history, error_vae_out_history)
 
 
 

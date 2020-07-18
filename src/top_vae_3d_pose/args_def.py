@@ -59,6 +59,8 @@ class __ENV():
                             help="Apply maxnorm constraint to the weights")
         parser.add_argument("--residual", action='store_true', default=False,
                             help="Whether to add a residual connection every 2 layers")
+        parser.add_argument("--train_all", action='store_true', default=False,
+                            help="Train all the nn or only the vae nn")
 
 
 
