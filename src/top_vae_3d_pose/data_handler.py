@@ -10,6 +10,39 @@ import data_utils
 from top_vae_3d_pose.args_def import ENVIRON as ENV
 
 
+def add_noise(data):
+    """ Add noise to the 3d joints
+        one joint is select randomly and a bigger noise is added by 'joint_noise_factor'
+    """
+    data_noised = np.array(data)
+    nsamples, points_dim = data.shape
+
+    joint_noise_factor = ENV.FLAGS.noise_3d[1]
+    noise = ENV.FLAGS.noise_3d[0]
+
+    # gaussian noise
+    noised_all = np.random.randn(nsamples, points_dim) * noise
+
+    # Select the joint for each sample and add more noise
+    joints_idx = np.random.choice(np.arange(points_dim), nsamples)
+    noise_single_joint = np.random.randn(nsamples, 3) * (noise + joint_noise_factor)
+
+    # Array of probs to add or no noise a any sample
+    probs = np.random.randn(nsamples)
+
+    for i in range(nsamples):
+        if probs[i] < 0.5:
+            continue
+        data_noised[i] += noised_all[i]
+        # Add noise for a single joint
+        jid = joints_idx[i] - joints_idx[i] % 3
+        data_noised[i][jid] += noise_single_joint[i][0]
+        data_noised[i][jid + 1] += noise_single_joint[i][1]
+        data_noised[i][jid + 2] += noise_single_joint[i][2]
+
+    return data_noised
+
+
 def get_data_params():
     """ Returns the actions, subjects and cams used """
     actions = data_utils.define_actions(ENV.FLAGS.action)
@@ -102,7 +135,7 @@ class Dataset(tf.keras.utils.Sequence):
         self.batch_step = 0
         self.shuffle = shuffle
         self.indexes = np.arange(self.data.shape[0])
-        self.add_noise()
+        self.data_noised = add_noise(self.data)
 
 
     def __len__(self):
@@ -136,40 +169,7 @@ class Dataset(tf.keras.utils.Sequence):
             np.random.shuffle(self.indexes)
         # Add new noise after each epoch
         if new_noise:
-            self.add_noise()
-
-
-    def add_noise(self, data=None):
-        """ Add noise to the 3d joints
-            one joint is select randomly and a bigger noise is added by 'joint_noise_factor'
-        """
-        if data is None:
-            data = self.data
-        self.data_noised = np.array(data)
-        nsamples, points_dim = data.shape
-
-        joint_noise_factor = ENV.FLAGS.noise_3d[1]
-        noise = ENV.FLAGS.noise_3d[0]
-
-        # gaussian noise
-        noised_all = np.random.randn(nsamples, points_dim) * noise
-
-        # Select the joint for each sample and add more noise
-        joints_idx = np.random.choice(np.arange(points_dim), nsamples)
-        noise_single_joint = np.random.randn(nsamples, 3) * (noise + joint_noise_factor)
-
-        # Array of probs to add or no noise a any sample
-        probs = np.random.randn(nsamples)
-
-        for i in range(nsamples):
-            if probs[i] < 0.5:
-                continue
-            self.data_noised[i] += noised_all[i]
-            # Add noise for a single joint
-            jid = joints_idx[i] - joints_idx[i] % 3
-            self.data_noised[i][jid] += noise_single_joint[i][0]
-            self.data_noised[i][jid + 1] += noise_single_joint[i][1]
-            self.data_noised[i][jid + 2] += noise_single_joint[i][2]
+            self.data_noised = add_noise(self.data)
 
 
 
@@ -321,3 +321,74 @@ class Dataset2D3D(tf.keras.utils.Sequence):
             return
         if self.shuffle is True:
             np.random.shuffle(self.indexes)
+
+
+def load_dataset_3d_seq(seq_len=4):
+    train_set_3d, test_set_3d, \
+    data_mean_3d, data_std_3d, \
+    dim_to_ignore_3d, dim_to_use_3d, \
+    train_root_positions, test_root_positions = load_3d_data_raw()
+
+    keys3d_train = list(train_set_3d.keys())
+    keys3d_test = list(test_set_3d.keys())
+
+    def get_next_seq(data, root_p):
+        for i in range(data.shape[0] - seq_len):
+            yield data[i:i+seq_len], data[i+seq_len-1], root_p[i:i+seq_len]
+
+    def build(data_tmp, keys_tmp, data_tmp_root):
+        x_seqs = []
+        root_pos = []
+        y_values = []
+        mapkeys = []
+
+        for key in keys_tmp:
+            gen_seq = get_next_seq(data_tmp[key], data_tmp_root[key])
+            x_s, y_v, rxy = zip(*[sv for sv in gen_seq])
+            keys = [key for _ in range(len(x_s))]
+            x_seqs += x_s
+            y_values += y_v
+            root_pos += rxy
+            mapkeys += keys
+
+        x_seqs = np.array(x_seqs)
+        y_values = np.array(y_values)
+        mapkeys = np.array(mapkeys)
+        root_pos = np.array(root_pos)
+
+        return x_seqs, y_values, mapkeys, root_pos
+
+
+    x_train, y_train, mapkeys_train, rp_train = build(train_set_3d, keys3d_train, train_root_positions)
+    x_test, y_test, mapkeys_test, rp_test = build(test_set_3d, keys3d_test, test_root_positions)
+    x_train = x_train.astype('float32')
+    x_test = x_test.astype('float32')
+
+
+    meta_train = Dataset2D3D.Metadata(data_mean_3d,
+                                      data_std_3d,
+                                      dim_to_ignore_3d,
+                                      dim_to_use_3d,
+                                      rp_train)
+    meta_test = Dataset2D3D.Metadata(data_mean_3d,
+                                     data_std_3d,
+                                     dim_to_ignore_3d,
+                                     dim_to_use_3d,
+                                     rp_test)
+
+    train = Dataset2D3D(x_train,
+                        y_train,
+                        meta_train,
+                        meta_train,
+                        mapkeys_train,
+                        batch_size=ENV.FLAGS.batch_size,
+                        shuffle=True)
+    test = Dataset2D3D(x_test,
+                       y_test,
+                       meta_test,
+                       meta_test,
+                       mapkeys_test,
+                       batch_size=ENV.FLAGS.batch_size,
+                       shuffle=True)
+
+    return train, test

@@ -41,8 +41,12 @@ class __ENV():
         # Architecture
         parser.add_argument("--model", type=str, default='VAE',
                             help="Model to use: [VAE], default VAE.")
-        parser.add_argument("--vae_dim", type=int, nargs='+', default=[200, 10],
-                            help="Dimensions for hidden layer and latent space, default [24, 12]")
+        parser.add_argument("--latent_dim", type=int, default=24,
+                            help="VAE latent dimension")
+        parser.add_argument("--enc_dim", type=int, nargs='+', default=[40, 32],
+                            help="VAE encoder dimension")
+        parser.add_argument("--dec_dim", type=int, nargs='+', default=[32, 40],
+                            help="VAE decoder dimension")
 
 
         # Training
