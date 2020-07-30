@@ -1,13 +1,46 @@
 """ Module to load and handle the train and test data """
 
+import os
 from collections import namedtuple
 
+import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
+from efficientnet.tfkeras import center_crop_and_resize, preprocess_input
+from skimage.io import imread
+from tqdm import tqdm
 
 import cameras
 import data_utils
 from top_vae_3d_pose.args_def import ENVIRON as ENV
+from top_vae_3d_pose.models import EFFICIENT_NET_INPUT_SHAPE
+
+matplotlib.use('Agg')
+# matplotlib.use('TkAgg')
+
+
+def plot_history(data, xlabel='Epochs', ylabel='loss', fname='loss.png'):
+    """ Plot """
+    plt.figure(figsize=(12, 6))
+
+    legends = []
+    for pname, y_data in data:
+        x_data = np.arange(len(y_data)) + 1
+        plt.plot(x_data, y_data)
+        legends.append(pname)
+
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.legend(legends)
+    plt.savefig('imgs/vae_concat_seq/%s' % fname)
+    plt.close()
+
+
+def save_history(data, fname):
+    """ Save history in a file """
+    with open('./experiments/vae_concat_seq/%s' % fname, 'wb') as f:
+        np.save(f, np.array(data))
 
 
 def add_noise(data):
@@ -19,9 +52,15 @@ def add_noise(data):
 
     joint_noise_factor = ENV.FLAGS.noise_3d[1]
     noise = ENV.FLAGS.noise_3d[0]
+    noise = 0.22108747
 
     # gaussian noise
-    noised_all = np.random.randn(nsamples, points_dim) * noise
+    noised_all = np.random.randn(nsamples, points_dim) * noise + 0.0011787938
+
+    # print(np.mean(noised_all))
+    # print(np.std(noised_all))
+    # print(np.min(noised_all))
+    # print(np.max(noised_all))
 
     # Select the joint for each sample and add more noise
     joints_idx = np.random.choice(np.arange(points_dim), nsamples)
@@ -184,24 +223,66 @@ def get_key3d(key2d):
     return key3d
 
 
-def keys2d_to_list(train_set_2d, test_set_2d):
+def keys2d_to_list(train_set_2d, test_set_2d, key2d_with_frame=False):
     """ Repeat each key by the length of the 2d data to match with the same index """
     keys_2d_train = list(train_set_2d.keys())
     keys_2d_test = list(test_set_2d.keys())
 
     keys = []
     for key in keys_2d_train:
+        frame = 1
         for _ in range(train_set_2d[key].shape[0]):
-            keys.append(key)
+            if key2d_with_frame:
+                keys.append((*key, frame))
+                frame += 1
+            else :
+                keys.append(key)
 
     for key in keys_2d_test:
+        frame = 1
         for _ in range(test_set_2d[key].shape[0]):
-            keys.append(key)
+            if key2d_with_frame:
+                keys.append((*key, frame))
+                frame += 1
+            else :
+                keys.append(key)
 
     return np.array(keys)
 
 
-def load_2d_3d_data():
+def load_frame_from_key(key2d, efficientnet_preprocess=False):
+    """ Return the image frame that belongs to the 2d key """
+    subject, _, action, frame = key2d
+    action = action.replace('.h5', '')
+
+    action_replaces = [
+        ('WalkDog', 'WalkingDog', [1]),
+        ('Photo', 'TakingPhoto', [1]),
+    ]
+    for ac_rpl in action_replaces:
+        if ac_rpl[0] in action and int(subject) in ac_rpl[2]:
+            action = action.replace(ac_rpl[0], ac_rpl[1])
+
+    img_path = 'training/subject/S%s/image_frames/%s/frame_%06d.jpg' % (subject, action, int(frame))
+    img_path = os.path.join(ENV.FLAGS.human_36m_path, img_path)
+    img = imread(img_path)
+
+    if efficientnet_preprocess:
+        img = center_crop_and_resize(img, image_size=EFFICIENT_NET_INPUT_SHAPE[1])
+        img = preprocess_input(img)
+
+    return img
+
+
+def load_frames_from_keys(keys2d, efficientnet_preprocess=False):
+    """ Return the images that belong to the keys """
+    return np.array([
+        load_frame_from_key(key2d, efficientnet_preprocess=efficientnet_preprocess)
+        for key2d in tqdm(keys2d, ascii=True, leave=False)
+    ])
+
+
+def load_2d_3d_data(return_raw=False, key2d_with_frame=False):
     """ Load the 2d and 3d data and returns two datasets for train and test """
     train_set_2d, test_set_2d, \
     data_mean_2d, data_std_2d, \
@@ -212,11 +293,23 @@ def load_2d_3d_data():
     dim_to_ignore_3d, dim_to_use_3d, \
     train_root_positions, test_root_positions = load_3d_data_raw()
 
-    all_keys = keys2d_to_list(train_set_2d, test_set_2d)
+    if return_raw:
+        RawDataset = namedtuple("RawDataset", "train test mean std dim_ignored dim_used train_root_pos test_root_pos")
+        points2d = RawDataset(train_set_2d, test_set_2d,
+                              data_mean_2d, data_std_2d,
+                              dim_to_ignore_2d, dim_to_use_2d,
+                              None, None)
+        points3d = RawDataset(train_set_3d, test_set_3d,
+                              data_mean_3d, data_std_3d,
+                              dim_to_ignore_3d, dim_to_use_3d,
+                              train_root_positions, test_root_positions)
+
+        return points2d, points3d
+
+    all_keys = keys2d_to_list(train_set_2d, test_set_2d, key2d_with_frame=key2d_with_frame)
     # pylint: disable=E1136  # pylint/issues/3139
     idx = np.random.choice(all_keys.shape[0], all_keys.shape[0], replace=False)
     train_keys, test_keys = suffle_and_split(all_keys, idx)
-
 
     # Get the keys for 2d points
     keys_2d_train = list(train_set_2d.keys())

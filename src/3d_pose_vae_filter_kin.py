@@ -135,29 +135,6 @@ def gen_sample_img(dataset, model=None, idx=None):
     plt.close()
 
 
-def plot_history(data, xlabel='Epochs', ylabel='loss', fname='loss.png'):
-    """ Plot the train vs test loss and vae out vs 3dpose out error through the epochs """
-    plt.figure(figsize=(12, 6))
-
-    legends = []
-    for pname, y_data in data:
-        x_data = np.arange(len(y_data)) + 1
-        plt.plot(x_data, y_data)
-        legends.append(pname)
-
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    plt.legend(legends)
-    plt.savefig('imgs/vae_concat_seq/%s' % fname)
-    plt.close()
-
-
-def save_history(data, fname):
-    """ Save the error and lost history on files """
-    with open('./experiments/vae_concat_seq/%s' % fname, 'wb') as f:
-        np.save(f, np.array(data))
-
-
 def get_optimizer():
     """ Returns the optimizer required by flags """
     if ENV.FLAGS.optimizer == 'adam':
@@ -180,7 +157,7 @@ def train_step_vae(model, x_data, y_data, optimizer):
 
 def train():
     """ Train function """
-    data_train, data_test = data_handler.load_dataset_3d_seq(seq_len=4)
+    data_train, data_test = data_handler.load_dataset_3d_seq(seq_len=3)
     print("Dataset dims")
     print(data_train.x_data.shape, data_train.y_data.shape)
     print(data_test.x_data.shape, data_test.y_data.shape)
@@ -213,15 +190,15 @@ def train():
     loss_train_history = []
     loss_test_history = []
     pred_error_history = []
-    error_45_history = []
-    error_4_pred_history = []
+    error_34_history = []
+    error_3_pred_history = []
 
     for epoch in range(1, ENV.FLAGS.epochs + 1):
         print("\nStarting epoch:", epoch)
 
         loss_train = tf.keras.metrics.Mean()
         # start_time = time.time()
-        for step, (x_train, y_train) in enumerate(tqdm(data_train)):
+        for step, (x_train, y_train) in enumerate(tqdm(data_train, ascii=True)):
             # x_train is a batch of seq of dimentions (batch_size, seq_len, input_size)
             batch_size, seq_len, size = x_train.shape
             x_train = x_train.reshape(batch_size, seq_len * size)
@@ -239,28 +216,37 @@ def train():
         print("Evaluation on Test data...")
         loss_test = tf.keras.metrics.Mean()
         pred_error = tf.keras.metrics.Mean()
-        error_45 = tf.keras.metrics.Mean()
-        error_4_pred = tf.keras.metrics.Mean()
+        error_34 = tf.keras.metrics.Mean()
+        error_3_pred = tf.keras.metrics.Mean()
+        error_2_pred = tf.keras.metrics.Mean()
+        error_1_pred = tf.keras.metrics.Mean()
 
-        for x_test, y_test in tqdm(data_test):
+        for x_test, y_test in tqdm(data_test, ascii=True):
             # x_test is a batch of seq of dimentions (batch_size, seq_len, input_size)
             batch_size, seq_len, size = x_test.shape
-            x_test4 = x_test[:, 3, :]
+            y_test = x_test[:, 2, :]
+            x_test3 = x_test[:, 1, :]
+            x_test2 = x_test[:, 0, :]
+            # x_test1 = x_test[:, 0, :]
             x_test = x_test.reshape(batch_size, seq_len * size)
             loss_test(losses.ELBO.compute_loss(model, x_test, y_test))
             preds = model(x_test, training=False)
             pred_error(losses.ELBO.compute_pred_error(y_test, preds))
-            error_45(losses.ELBO.compute_pred_error(x_test4, y_test))
-            error_4_pred(losses.ELBO.compute_pred_error(x_test4, preds))
+            error_34(losses.ELBO.compute_pred_error(x_test3, y_test))
+            error_3_pred(losses.ELBO.compute_pred_error(x_test3, preds))
+            error_2_pred(losses.ELBO.compute_pred_error(x_test2, preds))
+            # error_1_pred(losses.ELBO.compute_pred_error(x_test1, preds))
         loss_test_history.append(loss_test.result())
         pred_error_history.append(pred_error.result())
-        error_45_history.append(error_45.result())
-        error_4_pred_history.append(error_4_pred.result())
+        error_34_history.append(error_34.result())
+        error_3_pred_history.append(error_3_pred.result())
 
         print('Epoch: {}, Test set ELBO: {}'.format(epoch, loss_test_history[-1]))
+        print('Epoch: {}, Error frame 2 vs 3: {}'.format(epoch, error_34_history[-1]))
         print('Epoch: {}, Prediction Error: {}'.format(epoch, pred_error_history[-1]))
-        print('Epoch: {}, Error frame 4 vs 5: {}'.format(epoch, error_45_history[-1]))
-        print('Epoch: {}, Error frame 4 vs pred: {}'.format(epoch, error_4_pred_history[-1]))
+        print('Epoch: {}, Error frame 2 vs pred: {}'.format(epoch, error_3_pred_history[-1]))
+        print('Epoch: {}, Error frame 1 vs pred: {}'.format(epoch, error_2_pred.result()))
+        # print('Epoch: {}, Error frame 1 vs pred: {}'.format(epoch, error_1_pred.result()))
 
         tf.print('\nSaving samples...')
         gen_sample_img(data_test, model=model, idx=idx)
@@ -273,32 +259,117 @@ def train():
         save_path = manager.save()
         print("Checkpoint saved: {}".format(save_path))
 
-        plot_history([('Train Loss', loss_train_history),
-                      ('Test Loss', loss_test_history)],
-                     xlabel='Epochs',
-                     ylabel='Loss',
-                     fname='loss.png')
-        plot_history([('Pred error', pred_error_history),
-                      # ('Frame err 4vs5', error_45_history),
-                      ('Frame err 4vsPred', error_4_pred_history)],
-                     xlabel='Epochs',
-                     ylabel='Error',
-                     fname='error.png')
+        data_handler.plot_history([('Train Loss', loss_train_history),
+                                   ('Test Loss', loss_test_history)],
+                                  xlabel='Epochs',
+                                  ylabel='Loss',
+                                  fname='loss.png')
+        data_handler.plot_history([('Pred error', pred_error_history),
+                                   # ('Frame err 4vs5', error_34_history),
+                                   ('Frame err 4vsPred', error_3_pred_history)],
+                                  xlabel='Epochs',
+                                  ylabel='Error',
+                                  fname='error.png')
 
     # Save the weights of the las model and the config use to run and train
     model.save_weights('./experiments/vae_concat_seq/last_model_weights')
     with open('./experiments/vae_concat_seq/train.cfg', 'w') as cfg:
         json.dump(vars(ENV.FLAGS), cfg)
 
-    save_history(loss_train_history, 'train_loss.npy')
-    save_history(loss_test_history, 'test_loss.npy')
+    data_handler.save_history(loss_train_history, 'train_loss.npy')
+    data_handler.save_history(loss_test_history, 'test_loss.npy')
+
+
+
+
+def evaluate():
+    data2d, data3d = data_handler.load_2d_3d_data(return_raw=True)
+
+    model_2d23d = models.PoseBase()
+    # Dummy input for creation for bach normalization weigths
+    ainput = np.ones((10, 32), dtype=np.float32)
+    model_2d23d(ainput, training=False)
+    # Load weights for 2d to 3d prediction
+    model_2d23d.load_weights('pretrained_models/4874200_PoseBase/PoseBase')
+
+    # Load VAE Model
+    seq_len = 3
+    human_3d_size = 48
+    model_vae_kin = models.VAE(seq_len*human_3d_size,
+                               latent_dim=ENV.FLAGS.latent_dim,
+                               enc_dim=ENV.FLAGS.enc_dim,
+                               dec_dim=ENV.FLAGS.dec_dim)
+    model_vae_kin.load_weights('experiments/vae_concat_seq/last_model_weights')
+
+    error_2d_3d = tf.keras.metrics.Mean()
+    error_vae_kin = tf.keras.metrics.Mean()
+    noise_log = []
+
+    for key2d in tqdm(data2d.test.keys(), ascii=True):
+        err23d = tf.keras.metrics.Mean()
+        errvk = tf.keras.metrics.Mean()
+
+        tqdm.write("Subject: {}, action: {}, fname: {}".format(*key2d))
+
+        key3d = data_handler.get_key3d(key2d)
+
+        x_in = data2d.test[key2d]
+        x_out = data3d.test[key3d]
+
+        # Make a batch of size x.shape[0] to start the generation of the buffer
+        x_in = np.array_split(x_in, x_in.shape[0])
+        x_out = np.array_split(x_out, x_out.shape[0])
+
+        buffer = []
+
+        for x_2d, y_3d in tqdm(zip(x_in, x_out), total=len(x_in), ascii=True):
+            pred_3d = model_2d23d(x_2d, training=False)
+
+            if len(buffer) == 0:
+                # Start the buffer with the same predicion
+                buffer = [pred_3d[0] for _ in range(seq_len)]
+
+            buffer.append(pred_3d[0])
+            buffer.pop(0)
+
+            # print(pred_3d.shape)
+            # print(buffer)
+            # print(len(buffer))
+            vin = np.array([np.concatenate(buffer)])
+            ref_3d = model_vae_kin(vin, training=False)
+
+            # Add the last ref to the buffer
+            buffer[-1] = ref_3d[0]
+
+            err1 = losses.ELBO.compute_pred_error(y_3d, pred_3d)
+            err2 = losses.ELBO.compute_pred_error(y_3d, ref_3d)
+            err23d(err1)
+            errvk(err2)
+            error_2d_3d(err1)
+            error_vae_kin(err2)
+
+            noise_log.append(err1)
+
+        tqdm.write("Err 2d-3d: {}, VAE: {}".format(err23d.result(), errvk.result()))
+
+    print("Pred error 2d to 3d:", error_2d_3d.result())
+    print("Pred error vae filter:", error_vae_kin.result())
+
+    print(tf.math.reduce_mean(noise_log))
+    print(tf.math.reduce_std(noise_log))
+    print(tf.math.reduce_min(noise_log))
+    print(tf.math.reduce_max(noise_log))
+
 
 
 
 def main():
     """ Main """
     with tf.device('/device:GPU:%d' % ENV.FLAGS.gpu_device):
-        train()
+        if ENV.FLAGS.evaluate:
+            evaluate()
+        else:
+            train()
 
 
 if __name__ == "__main__":

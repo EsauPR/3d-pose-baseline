@@ -65,7 +65,12 @@ class __ENV():
                             help="Whether to add a residual connection every 2 layers")
         parser.add_argument("--train_all", action='store_true', default=False,
                             help="Train all the nn or only the vae nn")
-
+        parser.add_argument("--evaluate", action='store_true', default=False,
+                            help="Evaluate the prediction from 2d to 3d + VAE filter k_inputs")
+        parser.add_argument("--human_36m_path", type=str, default="data/human3.6m_downloader",
+                            help="Path where the videos and imgs frames are located")
+        parser.add_argument("--use_effb1", action='store_true', default=False,
+                            help="Use Efficient Net B1 instead of B0")
 
 
         # Directories

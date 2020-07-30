@@ -38,6 +38,24 @@ class ELBO():
 
         raise Exception('Invalid Loss Function: %s' % ENV.FLAGS.f_loss)
 
+        # def log_normal_pdf(sample, mean, logvar, raxis=1):
+        #     log2pi = tf.math.log(2. * np.pi)
+        #     return tf.reduce_sum(-.5 * ((sample - mean) ** 2. * tf.exp(-logvar) + logvar + log2pi), axis=raxis)
+
+        # mean, logvar = model.encode(x_noised)
+        # z = model.reparametrize(mean, logvar)
+        # x_logit = model.decode(z)
+
+        # x_logit = tf.cast(x_logit, tf.float64)
+        # cross_ent = tf.nn.sigmoid_cross_entropy_with_logits(logits=x_logit, labels=x_truth)
+        # cross_ent = tf.cast(cross_ent, tf.float32)
+
+        # logpx_z = -tf.reduce_sum(cross_ent, axis=[-1])
+        # logpz = log_normal_pdf(z, 0., 0.)
+        # logqz_x = log_normal_pdf(z, mean, logvar)
+        # return -tf.reduce_mean(logpx_z + logpz - logqz_x)
+
+
 
     @classmethod
     def compute_error_real_pred(cls, model, x_noised, x_truth, n=None):
