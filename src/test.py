@@ -32,7 +32,7 @@ matplotlib.use('Agg')
 def main():
     data2d, data3d = data_handler.load_2d_3d_data(key2d_with_frame=True)
 
-    images = data_handler.load_frames_from_keys(data2d.mapkeys)
+    images = data_handler.load_frames_from_keys(data2d.mapkeys, efficientnet_preprocess=True)
 
 
     # model_2d23d = models.PoseBase()
