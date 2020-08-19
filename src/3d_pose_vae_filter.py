@@ -203,7 +203,9 @@ def train():
     print(data_train.x_data.shape, data_train.y_data.shape)
     print(data_test.x_data.shape, data_test.y_data.shape)
 
-    model = models.Pose3DVae(latent_dim=ENV.FLAGS.vae_dim[-1], inter_dim=ENV.FLAGS.vae_dim[:-1])
+    model = models.Pose3DVae(latent_dim=ENV.FLAGS.latent_dim,
+                             enc_dim=ENV.FLAGS.enc_dim,
+                             dec_dim=ENV.FLAGS.dec_dim)
     # Dummy input for creation for bach normalization weigths
     ainput = np.ones((10, 32), dtype=np.float32)
     model(ainput, training=False)
@@ -241,28 +243,31 @@ def train():
     for epoch in range(1, ENV.FLAGS.epochs + 1):
         print("\nStarting epoch:", epoch)
 
-        loss_train = tf.keras.metrics.Mean()
-        # start_time = time.time()
-        for step, (x_train, y_train) in enumerate(tqdm(data_train)):
-            step_loss = train_step_vae(model, x_train, y_train, optimizer)
-            loss_train(step_loss)
-            if step % ENV.FLAGS.step_log == 0:
-                ltp = tf.math.reduce_mean(step_loss)
-                tqdm.write(" Training loss at step %d: %.4f" % (step, ltp))
-                tqdm.write(" Seen : %s samples" % ((step + 1) * ENV.FLAGS.batch_size))
-        # end_time = time.time()
-        loss_train_history.append(loss_train.result())
+        # loss_train = tf.keras.metrics.Mean()
+        # # start_time = time.time()
+        # for step, (x_train, y_train) in enumerate(tqdm(data_train)):
+        #     step_loss = train_step_vae(model, x_train, y_train, optimizer)
+        #     loss_train(step_loss)
+        #     if step % ENV.FLAGS.step_log == 0:
+        #         ltp = tf.math.reduce_mean(step_loss)
+        #         tqdm.write(" Training loss at step %d: %.4f" % (step, ltp))
+        #         tqdm.write(" Seen : %s samples" % ((step + 1) * ENV.FLAGS.batch_size))
+        # # end_time = time.time()
+        # loss_train_history.append(loss_train.result())
 
         print("Evaluation on Test data...")
         loss_test = tf.keras.metrics.Mean()
         error_vae_out = tf.keras.metrics.Mean()
         error_3d_out = tf.keras.metrics.Mean()
         for x_test, y_test in tqdm(data_test):
-            x_out = model.pose3d(x_test, training=False)
-            loss_test(losses.ELBO.compute_loss(model.vae, x_out, y_test))
-            err_p, err_n = losses.ELBO.compute_error_real_pred(model.vae, x_out, y_test)
-            error_vae_out(err_p)
-            error_3d_out(err_n)
+            x_out_3d = model.pose3d(x_test, training=False)
+            vae_out = model.vae(x_out_3d, training=False)
+
+            loss_test(losses.ELBO.compute_loss(model.vae, x_out_3d, y_test))
+
+            err_3d, err_vae = losses.ELBO.compute_loss_3d_vs_vae(y_test, x_out_3d, vae_out)
+            error_vae_out(err_vae)
+            error_3d_out(err_3d)
         loss_test_history.append(loss_test.result())
         error_vae_out_history.append(error_vae_out.result())
         error_3d_out_history.append(error_3d_out.result())
