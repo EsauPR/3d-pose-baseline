@@ -487,24 +487,24 @@ class Pose3DVae(keras.Model):
         super(Pose3DVae, self).__init__()
         self.human_3d_size = 48
 
-        if efficient_net == 0:
-            self.effnet = efn.EfficientNetB1(weights='imagenet',
-                                             include_top=False,
-                                             pooling='max',
-                                             input_shape=EFFICIENT_NET_INPUT_SHAPE)
-        elif efficient_net == 1:
-            self.effnet = efn.EfficientNetB0(weights='imagenet',
-                                             include_top=False,
-                                             pooling='max',
-                                             input_shape=EFFICIENT_NET_INPUT_SHAPE)
-        else:
-            raise Exception("Only B0 or B1 are valid values for Efficient Net")
-
         vae_input = self.human_3d_size
         self.use_effnet = False
         if efficient_net is not None:
-            vae_input += self.effnet.layers[-1].output_shape[1]
             self.use_effnet = True
+            if efficient_net == 0:
+                self.effnet = efn.EfficientNetB1(weights='imagenet',
+                                                 include_top=False,
+                                                 pooling='max',
+                                                 input_shape=EFFICIENT_NET_INPUT_SHAPE)
+            elif efficient_net == 1:
+                self.effnet = efn.EfficientNetB0(weights='imagenet',
+                                                 include_top=False,
+                                                 pooling='max',
+                                                 input_shape=EFFICIENT_NET_INPUT_SHAPE)
+            else:
+                raise Exception("Only B0 or B1 are valid values for Efficient Net")
+
+            vae_input += self.effnet.layers[-1].output_shape[1]
             self.concat = tf.keras.layers.Concatenate(axis=1)
 
         self.pose3d = PoseBase()
@@ -512,7 +512,6 @@ class Pose3DVae(keras.Model):
                        latent_dim=latent_dim,
                        enc_dim=enc_dim,
                        dec_dim=dec_dim)
-
 
 
     def call(self, inputs, frame_inputs=None, training=True):

@@ -243,17 +243,17 @@ def train():
     for epoch in range(1, ENV.FLAGS.epochs + 1):
         print("\nStarting epoch:", epoch)
 
-        # loss_train = tf.keras.metrics.Mean()
-        # # start_time = time.time()
-        # for step, (x_train, y_train) in enumerate(tqdm(data_train)):
-        #     step_loss = train_step_vae(model, x_train, y_train, optimizer)
-        #     loss_train(step_loss)
-        #     if step % ENV.FLAGS.step_log == 0:
-        #         ltp = tf.math.reduce_mean(step_loss)
-        #         tqdm.write(" Training loss at step %d: %.4f" % (step, ltp))
-        #         tqdm.write(" Seen : %s samples" % ((step + 1) * ENV.FLAGS.batch_size))
-        # # end_time = time.time()
-        # loss_train_history.append(loss_train.result())
+        loss_train = tf.keras.metrics.Mean()
+        # start_time = time.time()
+        for step, (x_train, y_train) in enumerate(tqdm(data_train)):
+            step_loss = train_step_vae(model, x_train, y_train, optimizer)
+            loss_train(step_loss)
+            if step % ENV.FLAGS.step_log == 0:
+                ltp = tf.math.reduce_mean(step_loss)
+                tqdm.write(" Training loss at step %d: %.4f" % (step, ltp))
+                tqdm.write(" Seen : %s samples" % ((step + 1) * ENV.FLAGS.batch_size))
+        # end_time = time.time()
+        loss_train_history.append(loss_train.result())
 
         print("Evaluation on Test data...")
         loss_test = tf.keras.metrics.Mean()
