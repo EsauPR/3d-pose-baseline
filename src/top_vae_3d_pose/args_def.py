@@ -67,8 +67,6 @@ class __ENV():
                             help="Train all the nn or only the vae nn")
         parser.add_argument("--evaluate", action='store_true', default=False,
                             help="Evaluate the prediction from 2d to 3d + VAE filter k_inputs")
-        parser.add_argument("--human_36m_path", type=str, default="data/human3.6m_downloader",
-                            help="Path where the videos and imgs frames are located")
         parser.add_argument("--use_effb1", action='store_true', default=False,
                             help="Use Efficient Net B1 instead of B0")
 
@@ -80,6 +78,8 @@ class __ENV():
                             default="data/h36m/", help="Data directory")
         parser.add_argument("--train_dir", type=str,
                             default="experiments", help="Training directory.")
+        parser.add_argument("--human_36m_path", type=str, default="data/human3.6m_downloader",
+                            help="Path where the videos and imgs frames are located")
 
         parser.add_argument("--sample", action='store_true', default=False,
                             help="Set to True for sampling.")
