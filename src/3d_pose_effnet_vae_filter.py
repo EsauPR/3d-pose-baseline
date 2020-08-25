@@ -104,7 +104,7 @@ def gen_sample_img(dataset, model=None, idx=None):
 
     # 1080p	= 1,920 x 1,080
     fig = plt.figure(figsize=(19.2, 10.8))
-
+l
     gs1 = gridspec.GridSpec(5, 12) # 5 rows, 9 columns
     gs1.update(wspace=-0.00, hspace=0.05) # set the spacing between axes.
     plt.axis('off')
@@ -279,10 +279,10 @@ def train():
                                   ylabel='Error',
                                   fname='error.png')
 
-    # Save the weights of the las model and the config use to run and train
-    model.save_weights('./experiments/3d_effnet_vae/last_model_weights')
-    with open('./experiments/3d_effnet_vae/train.cfg', 'w') as cfg:
-        json.dump(vars(ENV.FLAGS), cfg)
+        # Save the weights of the las model and the config use to run and train
+        model.save_weights('./experiments/3d_effnet_vae/last_model_weights')
+        with open('./experiments/3d_effnet_vae/train.cfg', 'w') as cfg:
+            json.dump(vars(ENV.FLAGS), cfg)
 
     data_handler.save_history(loss_train_history, 'train_loss.npy')
     data_handler.save_history(loss_test_history, 'test_loss.npy')
