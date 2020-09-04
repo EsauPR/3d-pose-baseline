@@ -20,7 +20,7 @@ from top_vae_3d_pose.args_def import ENVIRON as ENV
 matplotlib.use('Agg')
 # matplotlib.use('TkAgg')
 
-tf.debugging.set_log_device_placement(True)
+# tf.debugging.set_log_device_placement(True)
 
 
 def to_world(points_3d, key2d, root_pos):
@@ -245,7 +245,7 @@ def train():
 
         loss_train = tf.keras.metrics.Mean()
         # start_time = time.time()
-        for step, (x_train, y_train) in enumerate(tqdm(data_train)):
+        for step, (x_train, y_train) in enumerate(tqdm(data_train, ascii=True)):
             step_loss = train_step_vae(model, x_train, y_train, optimizer)
             loss_train(step_loss)
             if step % ENV.FLAGS.step_log == 0:
@@ -259,7 +259,7 @@ def train():
         loss_test = tf.keras.metrics.Mean()
         error_vae_out = tf.keras.metrics.Mean()
         error_3d_out = tf.keras.metrics.Mean()
-        for x_test, y_test in tqdm(data_test):
+        for x_test, y_test in tqdm(data_test, ascii=True):
             x_out_3d = model.pose3d(x_test, training=False)
             vae_out = model.vae(x_out_3d, training=False)
 
@@ -299,8 +299,35 @@ def train():
 
 def main():
     """ Main """
-    with tf.device('/device:GPU:%d' % ENV.FLAGS.gpu_device):
-        train()
+    # gpus = tf.config.experimental.list_physical_devices('GPU')
+    # if gpus:
+    #     try:
+    #         # Currently, memory growth needs to be the same across GPUs
+    #         for gpu in gpus:
+    #             tf.config.experimental.set_memory_growth(gpu, True)
+    #         logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+    #         print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+    #     except RuntimeError as e:
+    #         # Memory growth must be set before GPUs have been initialized
+    #         print(e)
+
+    physical_devices = tf.config.list_physical_devices('GPU')
+    print(physical_devices)
+    try:
+       # Disable first GPU
+       tf.config.set_visible_devices(physical_devices[2], 'GPU')
+       logical_devices = tf.config.list_logical_devices('GPU')
+       # Logical device was not created for first GPU
+       assert len(logical_devices) == 1
+    except:
+       print("nel")
+
+    print(tf.config.list_logical_devices('GPU'))
+    train()
+
+
+    # with tf.device('/device:GPU:%d' % ENV.FLAGS.gpu_device):
+    #     train()
 
 
 if __name__ == "__main__":
