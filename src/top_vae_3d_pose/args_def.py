@@ -37,6 +37,7 @@ class __ENV():
                             help="The action to train on. 'All' means all the actions")
         parser.add_argument("--optimizer", type=str, default="adam",
                             help="Optimizer to use [adam, rmsprop]")
+        parser.add_argument("--workers", type=int, default=20, help="Number of workers")
 
         # Architecture
         parser.add_argument("--model", type=str, default='VAE',

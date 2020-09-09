@@ -95,12 +95,12 @@ class ELBO():
 
     @classmethod
     def compute_loss_3d_vs_vae(cls, real_out, out_3d, out_vae):
-        loss1 = tf.reduce_mean(tf.math.square(real_out - out_3d))
-        loss2 = tf.reduce_mean(tf.math.square(real_out - out_vae))
+        loss1 = tf.reduce_mean(tf.math.square(real_out - out_3d), axis=1)
+        loss2 = tf.reduce_mean(tf.math.square(real_out - out_vae), axis=1)
         return loss1, loss2
 
 
     @classmethod
     def compute_pred_error(cls, real_out, pred_out):
-        error = tf.reduce_mean(tf.math.square(real_out - pred_out))
+        error = tf.reduce_mean(tf.math.square(real_out - pred_out), axis=1)
         return error

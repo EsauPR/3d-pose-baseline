@@ -483,11 +483,17 @@ class PoseBase(tf.keras.Model):
 
 class Pose3DVae(keras.Model):
     """ Model with the 3dpose prediction + VAE filter """
-    def __init__(self, latent_dim, enc_dim, dec_dim, efficient_net=None):
+    def __init__(self, latent_dim, enc_dim, dec_dim, efficient_net=None, use_2d=False):
         super(Pose3DVae, self).__init__()
+        self.use_2d = use_2d
         self.human_3d_size = 48
+        self.human_2d_size = 32
 
         vae_input = self.human_3d_size
+
+        if use_2d:
+            vae_input += self.human_2d_size
+
         self.use_effnet = False
         if efficient_net is not None:
             self.use_effnet = True
@@ -505,6 +511,8 @@ class Pose3DVae(keras.Model):
                 raise Exception("Only B0 or B1 are valid values for Efficient Net")
 
             vae_input += self.effnet.layers[-1].output_shape[1]
+
+        if use_2d or efficient_net is not None:
             self.concat = tf.keras.layers.Concatenate(axis=1)
 
         self.pose3d = PoseBase()
@@ -517,6 +525,9 @@ class Pose3DVae(keras.Model):
     def call(self, inputs, frame_inputs=None, training=True):
         out_2d3d = self.pose3d(inputs, training=training)
         out1 = out_2d3d
+
+        if self.use_2d:
+            out1 = self.concat([inputs, out1])
 
         if self.use_effnet:
             out1e = self.effnet(frame_inputs, training=training)

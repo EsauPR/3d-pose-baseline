@@ -1,14 +1,16 @@
 """ Module to load and handle the train and test data """
 
+import concurrent.futures
 import os
 from collections import namedtuple
 
+# from efficientnet.tfkeras import center_crop_and_resize, preprocess_input
+# from skimage.io import imread
+import cv2
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-from efficientnet.tfkeras import center_crop_and_resize, preprocess_input
-from skimage.io import imread
 from tqdm import tqdm
 
 import cameras
@@ -250,6 +252,28 @@ def keys2d_to_list(train_set_2d, test_set_2d, key2d_with_frame=False):
     return np.array(keys)
 
 
+def pre_pros_img(image, image_size, crop_padding=32):
+    assert image.ndim in {2, 3}
+
+    h, w = image.shape[:2]
+
+    padded_center_crop_size = int(
+        (image_size / (image_size + crop_padding)) * min(h, w)
+    )
+    offset_height = ((h - padded_center_crop_size) + 1) // 2
+    offset_width = ((w - padded_center_crop_size) + 1) // 2
+
+    image_crop = image[
+                     offset_height: padded_center_crop_size + offset_height,
+                     offset_width: padded_center_crop_size + offset_width,
+                 ]
+
+    resized_image = cv2.resize(image_crop, (image_size, image_size), interpolation=cv2.INTER_CUBIC)
+
+    return  (resized_image / 255) * 2 - 1
+
+
+
 def load_frame_from_key(key2d, efficientnet_preprocess=False):
     """ Return the image frame that belongs to the 2d key """
     subject, _, action, frame = key2d
@@ -265,24 +289,49 @@ def load_frame_from_key(key2d, efficientnet_preprocess=False):
 
     img_path = 'training/subject/S%s/image_frames/%s/frame_%06d.jpg' % (subject, action, int(frame))
     img_path = os.path.join(ENV.FLAGS.human_36m_path, img_path)
-    img = imread(img_path)
+    img = cv2.imread(img_path)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     if efficientnet_preprocess:
-        img_ccr = center_crop_and_resize(img, image_size=EFFICIENT_NET_INPUT_SHAPE[1])
-        del img
-        img_p = preprocess_input(img_ccr)
-        del img_ccr
-        return img_p
+        # img_ccr = center_crop_and_resize(img, image_size=EFFICIENT_NET_INPUT_SHAPE[1])
+        # img_p = preprocess_input(img_ccr)
+
+        img = pre_pros_img(img, image_size=EFFICIENT_NET_INPUT_SHAPE[0], crop_padding=100)
+
+        return img
 
     return img
 
 
+# def load_frames_from_keys(keys2d, efficientnet_preprocess=False):
+#     """ Return the images that belong to the keys """
+#     return np.array([
+#         load_frame_from_key(key2d, efficientnet_preprocess=efficientnet_preprocess)
+#         for key2d in tqdm(keys2d, ascii=True, leave=False)
+#     ])
+
+
 def load_frames_from_keys(keys2d, efficientnet_preprocess=False):
     """ Return the images that belong to the keys """
-    return np.array([
-        load_frame_from_key(key2d, efficientnet_preprocess=efficientnet_preprocess)
-        for key2d in tqdm(keys2d, ascii=True, leave=False)
-    ])
+    with concurrent.futures.ThreadPoolExecutor(max_workers=ENV.FLAGS.workers) as executor:
+        reqs = {
+            executor.submit(load_frame_from_key, key2d, efficientnet_preprocess) : key2d[-1]
+            for key2d in keys2d
+        }
+
+        results = [
+            (future.result(), reqs[future])
+            # for future in tqdm(concurrent.futures.as_completed(reqs),
+            #                    ascii=True,
+            #                    leave=False,
+            #                    total=len(keys2d))
+            for future in concurrent.futures.as_completed(reqs)
+        ]
+    # The results are not in the same order
+    results.sort(key=lambda dt: dt[1])
+    images, _ = zip(*results)
+
+    return np.array(images)
 
 
 def load_2d_3d_data(return_raw=False, key2d_with_frame=False):
