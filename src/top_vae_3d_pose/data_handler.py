@@ -321,10 +321,6 @@ def load_frames_from_keys(keys2d, efficientnet_preprocess=False):
 
         results = [
             (future.result(), reqs[future])
-            # for future in tqdm(concurrent.futures.as_completed(reqs),
-            #                    ascii=True,
-            #                    leave=False,
-            #                    total=len(keys2d))
             for future in concurrent.futures.as_completed(reqs)
         ]
     # The results are not in the same order

@@ -223,7 +223,9 @@ def train():
 
         loss_train = tf.keras.metrics.Mean()
         # start_time = time.time()
-        for step, (x_train, y_train) in enumerate(tqdm(data_train, ascii=True)):
+        for step, (x_train, y_train) in enumerate(tqdm(data_train,
+                                                       bar_format=ENV.BAR_FORMAT,
+                                                       ascii=True)):
             current_keys2d = data_train.mapkeys[data_train.batch_idx, :]
             images_frames = data_handler.load_frames_from_keys(current_keys2d,
                                                                efficientnet_preprocess=True)

@@ -10,6 +10,7 @@ class __ENV():
         self.FLAGS = None
         self.TRAIN_DIR = None
         self.SUMMARIES_DIR = None
+        self.BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'
 
         parser = argparse.ArgumentParser()
 
