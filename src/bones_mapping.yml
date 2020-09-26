@@ -1,0 +1,71 @@
+# Mapping for all the paths the follow the bones with ther joints from the center (pelvis)
+
+bones_path:
+  - pelvis:
+      joint_id_32: 0
+      joint_id_17: -1 # The pevils or hip is not predicted because is always de center (0,0,0)
+      next:
+        - rhip:
+            joint_id_32: 1
+            joint_id_17: 0
+            next:
+              - rknee:
+                  joint_id_32: 2
+                  joint_id_17: 1
+                  next:
+                    - rankle:
+                        joint_id_32: 3
+                        joint_id_17: 2
+                        next: null
+        - lhip:
+            joint_id_32: 6
+            joint_id_17: 3
+            next:
+              - lknee:
+                  joint_id_32: 7
+                  joint_id_17: 4
+                  next:
+                    - lankle:
+                        joint_id_32: 8
+                        joint_id_17: 5
+                        next: null
+        - spine:
+            joint_id_32: 12
+            joint_id_17: 6
+            next:
+              - thorax:
+                  joint_id_32: 13
+                  joint_id_17: 7
+                  next:
+                    - neck:
+                        joint_id_32: 14
+                        joint_id_17: 8
+                        next:
+                          - head:
+                              joint_id_32: 15
+                              joint_id_17: 9
+                              next: null
+                          - rshoulder:
+                              joint_id_32: 25
+                              joint_id_17: 13
+                              next:
+                                - relbow:
+                                    joint_id_32: 26
+                                    joint_id_17: 14
+                                    next:
+                                      - rwrist:
+                                          joint_id_32: 27
+                                          joint_id_17: 15
+                                          next: null
+                          - lshoulder:
+                              joint_id_32: 17
+                              joint_id_17: 10
+                              next:
+                                - lelbow:
+                                    joint_id_32: 18
+                                    joint_id_17: 11
+                                    next:
+                                      - lwrist:
+                                          joint_id_32: 19
+                                          joint_id_17: 12
+                                          next: null

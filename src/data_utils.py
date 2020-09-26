@@ -3,15 +3,17 @@
 
 from __future__ import division
 
+import copy
+import glob
 import os
-import numpy as np
+
+import h5py
 import matplotlib.pyplot as plt
+import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
+
 import cameras
 import viz
-import h5py
-import glob
-import copy
 
 # Human3.6m IDs for training and testing
 TRAIN_SUBJECTS = [1,5,6,7,8]
@@ -80,10 +82,10 @@ def load_data( bpath, subjects, actions, dim=3 ):
   for subj in subjects:
     for action in actions:
 
-      print('Reading subject {0}, action {1}'.format(subj, action))
+      # print('Reading subject {0}, action {1}'.format(subj, action))
 
       dpath = os.path.join( bpath, 'S{0}'.format(subj), 'MyPoses/{0}D_positions'.format(dim), '{0}*.h5'.format(action) )
-      print( dpath )
+      # print( dpath )
 
       fnames = glob.glob( dpath )
 
@@ -98,7 +100,7 @@ def load_data( bpath, subjects, actions, dim=3 ):
         # This rule makes sure that WalkDog and WalkTogeter are not loaded when
         # Walking is requested.
         if seqname.startswith( action ):
-          print( fname )
+          # print( fname )
           loaded_seqs = loaded_seqs + 1
 
           with h5py.File( fname, 'r' ) as h5f:

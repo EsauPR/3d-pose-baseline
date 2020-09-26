@@ -246,7 +246,7 @@ def train():
 
             loss_test(losses.ELBO.compute_loss(model.vae, x_out, y_test))
 
-            err_3d, err_vae = losses.ELBO.compute_loss_3d_vs_vae(y_test, x_out_3d, vae_out)
+            err_3d, err_vae = losses.ELBO.compute_error_3d_vs_vae(y_test, x_out_3d, vae_out)
             error_3d_out(err_3d)
             error_vae_out(err_vae)
 

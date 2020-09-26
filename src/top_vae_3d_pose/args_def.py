@@ -3,6 +3,8 @@
 import os
 import argparse
 
+BAR_FORMAT = '{l_bar}{bar:30}{r_bar}'
+
 
 class __ENV():
 
@@ -10,7 +12,7 @@ class __ENV():
         self.FLAGS = None
         self.TRAIN_DIR = None
         self.SUMMARIES_DIR = None
-        self.BAR_FORMAT = '{l_bar}{bar:10}{r_bar}'
+        self.BAR_FORMAT = BAR_FORMAT
 
         parser = argparse.ArgumentParser()
 
@@ -59,7 +61,11 @@ class __ENV():
                             help="std for noise to add to truth 3d points")
         parser.add_argument("--f_loss", type=str, default="mse",
                             help="Loss use in ELBO function [mae, mse]")
-        parser.add_argument("--likelihood_factor", type=float, default=10,
+        parser.add_argument("--likelihood_factor", type=float, default=1.0,
+                            help="Term to regularize the likelihood loss for ELBO")
+        parser.add_argument("--dkl_factor", type=float, default=1.0,
+                            help="Term to regularize the likelihood loss for ELBO")
+        parser.add_argument("--kcs_factor", type=float, default=1.0,
                             help="Term to regularize the likelihood loss for ELBO")
         parser.add_argument("--max_norm", action='store_true', default=False,
                             help="Apply maxnorm constraint to the weights")
@@ -82,6 +88,10 @@ class __ENV():
                             default="experiments", help="Training directory.")
         parser.add_argument("--human_36m_path", type=str, default="data/human3.6m_downloader",
                             help="Path where the videos and imgs frames are located")
+        parser.add_argument("--effnet_outputs_path", type=str, default="data/human36m_effnet.hdf5",
+                            help="File path for the outputs of the efficientNet model")
+        parser.add_argument("--bones_mapping_dir", type=str, default="src/bones_mapping.yml",
+                            help="File that maps the bones arquitecture")
 
         parser.add_argument("--sample", action='store_true', default=False,
                             help="Set to True for sampling.")

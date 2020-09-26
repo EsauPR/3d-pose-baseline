@@ -1,6 +1,8 @@
 """ Train a VAE model used to filter and enhance 3d points """
 
 import json
+import os
+
 from datetime import datetime
 
 import matplotlib
@@ -64,11 +66,11 @@ def gen_sample_img(dataset, model=None, idx=None):
         idx = np.random.choice(dataset.x_data.shape[0], nsamples, replace=False)
 
     keys2d = dataset.mapkeys[idx, :]
-    img_frames = data_handler.load_frames_from_keys(keys2d, efficientnet_preprocess=True)
+    effnet_out = dataset.effnet_out[idx, :]
 
     points_2d = dataset.x_data[idx, :]
     points_3d = dataset.y_data[idx, :]
-    out_3d, out_3d_vae = model(points_2d, frame_inputs=img_frames, training=False)
+    out_3d, out_3d_vae = model(points_2d, effnet_output=effnet_out, training=False)
 
     # unnormalioze data
     points_2d = data_utils.unNormalizeData(points_2d,
@@ -153,30 +155,33 @@ def get_optimizer():
 
 
 @tf.function
-def train_step_vae(model, x_data, y_data, images_frames, optimizer):
+def train_step_vae(model, x_data, y_data, effnet_out, optimizer):
     """ Define a train step """
     with tf.GradientTape() as tape:
         x_out_3d = model.pose3d(x_data, training=ENV.FLAGS.train_all)
-        x_out_img = model.effnet(images_frames, training=ENV.FLAGS.train_all)
-        x_out = model.concat([x_data, x_out_3d, x_out_img])
+        x_out = model.concat([x_data, x_out_3d, effnet_out])
 
         loss = losses.ELBO.compute_loss(model.vae, x_out, y_data)
-    gradients = tape.gradient(loss, model.vae.trainable_variables)
+        loss_sum = tf.reduce_sum(loss)
+    gradients = tape.gradient(loss_sum, model.vae.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.vae.trainable_variables))
     return loss
 
 
 def train():
     """ Train function """
-    data_train, data_test = data_handler.load_2d_3d_data(key2d_with_frame=True)
+    data_train, data_test = data_handler.load_2d_3d_data(key2d_with_frame=True,
+                                                         load_effnet_outputs=True)
     print("Dataset dims")
     print(data_train.x_data.shape, data_train.y_data.shape)
     print(data_test.x_data.shape, data_test.y_data.shape)
+    print(data_train.y_metadata.dim_used)
+    print(data_train.y_metadata.dim_ignored)
 
     model = models.Pose3DVae(latent_dim=ENV.FLAGS.latent_dim,
                              enc_dim=ENV.FLAGS.enc_dim,
                              dec_dim=ENV.FLAGS.dec_dim,
-                             efficient_net=0,
+                             use_effnet_ouptut=True,
                              use_2d=True)
     # Dummy input for creation for bach normalization weigths
     ainput = np.ones((10, 32), dtype=np.float32)
@@ -200,7 +205,6 @@ def train():
         print("Training all")
     else:
         model.pose3d.trainable = False
-        model.effnet.trainable = False
         print("Training only VAE weights:", len(model.trainable_weights))
 
 
@@ -214,59 +218,58 @@ def train():
     loss_test_history = []
 
     for epoch in range(1, ENV.FLAGS.epochs + 1):
-        if epoch > 5:
-            data_train.batch_size = ENV.FLAGS.batch_size + 600
-        if epoch > 10:
-            data_train.batch_size = ENV.FLAGS.batch_size * 3
+        # if epoch > 5:
+        #     data_train.batch_size = ENV.FLAGS.batch_size + 600
+        # if epoch > 10:
+        #     data_train.batch_size = ENV.FLAGS.batch_size * 3
 
         print("\nStarting epoch:", epoch)
 
         loss_train = tf.keras.metrics.Mean()
-        # start_time = time.time()
-        for step, (x_train, y_train) in enumerate(tqdm(data_train,
-                                                       bar_format=ENV.BAR_FORMAT,
-                                                       ascii=True)):
-            current_keys2d = data_train.mapkeys[data_train.batch_idx, :]
-            images_frames = data_handler.load_frames_from_keys(current_keys2d,
-                                                               efficientnet_preprocess=True)
 
-            step_loss = train_step_vae(model, x_train, y_train, images_frames, optimizer)
+        pbar = tqdm(data_train, bar_format=ENV.BAR_FORMAT, ascii=True)
+        losses.ELBO.PBAR = pbar
+        losses.ELBO.LOG = True
+        for step, (x_train, y_train) in enumerate(pbar):
+            effnet_out = data_train.get_effnet_out_batch()
+
+            step_loss = train_step_vae(model, x_train, y_train, effnet_out, optimizer)
             loss_train(step_loss)
+            pbar.set_description("Losses:: REC %.4f, KCS %.4f, DKL %.4f" % (step_loss[0],
+                                                                            step_loss[1],
+                                                                            step_loss[2]))
             if step % ENV.FLAGS.step_log == 0:
-                ltp = tf.math.reduce_mean(step_loss)
+                ltp = tf.math.reduce_sum(step_loss)
                 tqdm.write(" Training loss at step %d: %.4f" % (step, ltp))
                 tqdm.write(" Seen : %s samples" % ((step + 1) * ENV.FLAGS.batch_size))
 
-                ckpt.step.assign_add(1)
-                save_path = manager.save()
-                tqdm.write("Checkpoint saved: {}".format(save_path))
-
-        # end_time = time.time()
         loss_train_history.append(loss_train.result())
 
+        ckpt.step.assign_add(1)
+        save_path = manager.save()
+        tqdm.write("Checkpoint saved: {}".format(save_path))
+
         print("Evaluation on Test data...")
-        loss_test = tf.keras.metrics.Mean()
+        # loss_test = tf.keras.metrics.Mean()
         error_vae_out = tf.keras.metrics.Mean()
         error_3d_out = tf.keras.metrics.Mean()
-        for x_test, y_test in tqdm(data_test, ascii=True):
-            current_keys2d = data_test.mapkeys[data_test.batch_idx, :]
-            images_frames = data_handler.load_frames_from_keys(current_keys2d,
-                                                               efficientnet_preprocess=True)
+        for x_test, y_test in tqdm(data_test, bar_format=ENV.BAR_FORMAT, ascii=True):
+            effnet_out = data_test.get_effnet_out_batch()
+
             x_out_3d = model.pose3d(x_test, training=False)
-            x_out_img = model.effnet(images_frames, training=False)
-            x_out = model.concat([x_test, x_out_3d, x_out_img])
+            x_out = model.concat([x_test, x_out_3d, effnet_out])
             vae_out = model.vae(x_out, training=False)
 
-            loss_test(losses.ELBO.compute_loss(model.vae, x_out, y_test))
-
-            err_3d, err_vae = losses.ELBO.compute_loss_3d_vs_vae(y_test, x_out_3d, vae_out)
+            # loss = tf.reduce_sum(losses.ELBO.compute_loss(model.vae, x_out, y_test))
+            # loss_test(loss)
+            err_3d, err_vae = losses.ELBO.compute_error_3d_vs_vae(y_test, x_out_3d, vae_out)
             error_3d_out(err_3d)
             error_vae_out(err_vae)
 
-        loss_test_history.append(loss_test.result())
+        # loss_test_history.append(loss_test.result())
         error_vae_out_history.append(error_vae_out.result())
         error_3d_out_history.append(error_3d_out.result())
-        print('Epoch: {}, Test set ELBO: {}'.format(epoch, loss_test_history[-1]))
+        # print('Epoch: {}, Test set ELBO: {}'.format(epoch, loss_test_history[-1]))
         tf.print('Error real vs 3d out:', error_3d_out_history[-1])
         tf.print('Error real vs vae out:', error_vae_out_history[-1])
         tf.print('\nSaving samples...')
@@ -276,13 +279,12 @@ def train():
         data_train.on_epoch_end()
         data_test.on_epoch_end(avoid_suffle=True)
 
-        data_handler.plot_history([('Train Loss', loss_train_history),
-                                   ('Test Loss', loss_test_history)],
-                                  xlabel='Epochs',
-                                  ylabel='Loss',
-                                  fname='loss.png')
+        # data_handler.plot_history([('Train Loss', loss_train_history),
+        #                            ('Test Loss', loss_test_history)],
+        #                           xlabel='Epochs',
+        #                           ylabel='Loss',
+        #                           fname='loss.png')
         data_handler.plot_history([('Pred error', error_vae_out_history),
-                                   # ('Frame err 4vs5', error_34_history),
                                    ('2d 3d error', error_3d_out_history)],
                                   xlabel='Epochs',
                                   ylabel='Error',
@@ -294,7 +296,7 @@ def train():
             json.dump(vars(ENV.FLAGS), cfg)
 
     data_handler.save_history(loss_train_history, 'train_loss.npy')
-    data_handler.save_history(loss_test_history, 'test_loss.npy')
+    # data_handler.save_history(loss_test_history, 'test_loss.npy')
     data_handler.save_history(error_3d_out_history, 'error_2d3d.npy')
     data_handler.save_history(error_vae_out_history, 'error_vae.npy')
 
@@ -302,20 +304,22 @@ def train():
 
 def main():
     """ Main """
-    gpus = tf.config.experimental.list_physical_devices('GPU')
-    if gpus:
-        try:
-            # Currently, memory growth needs to be the same across GPUs
-            for gpu in gpus:
-                tf.config.experimental.set_memory_growth(gpu, True)
-            logical_gpus = tf.config.experimental.list_logical_devices('GPU')
-            print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
-        except RuntimeError as e:
-            # Memory growth must be set before GPUs have been initialized
-            print(e)
+    os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
-    with tf.device('/device:GPU:%d' % ENV.FLAGS.gpu_device):
-        train()
+    # gpus = tf.config.experimental.list_physical_devices('GPU')
+    # if gpus:
+    #     try:
+    #         # Currently, memory growth needs to be the same across GPUs
+    #         for gpu in gpus:
+    #             tf.config.experimental.set_memory_growth(gpu, True)
+    #         logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+    #         print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+    #     except RuntimeError as e:
+    #         # Memory growth must be set before GPUs have been initialized
+    #         print(e)
+
+    # with tf.device('/device:GPU:%d' % ENV.FLAGS.gpu_device):
+    train()
 
 
 if __name__ == "__main__":

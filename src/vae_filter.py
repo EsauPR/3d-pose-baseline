@@ -182,7 +182,10 @@ def train():
         error_noised = tf.keras.metrics.Mean()
         for x_noised, x_truth in data_test:
             loss_test(losses.ELBO.compute_loss(model, x_noised, x_truth))
-            err_p, err_n = losses.ELBO.compute_error_real_pred(model, x_noised, x_truth)
+
+            err_n, err_p = losses.ELBO.compute_pred_error(x_noised, x_truth), \
+                           losses.ELBO.compute_pred_error(model(x_noised, training=False), x_truth)
+
             error_pred(err_p)
             error_noised(err_n)
         loss_test_history.append(loss_test.result())

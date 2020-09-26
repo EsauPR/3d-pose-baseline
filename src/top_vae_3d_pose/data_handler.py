@@ -4,19 +4,19 @@ import concurrent.futures
 import os
 from collections import namedtuple
 
-# from efficientnet.tfkeras import center_crop_and_resize, preprocess_input
-# from skimage.io import imread
+import cameras
 import cv2
+import data_utils
+import h5py
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-from tqdm import tqdm
 
-import cameras
-import data_utils
 from top_vae_3d_pose.args_def import ENVIRON as ENV
 from top_vae_3d_pose.models import EFFICIENT_NET_INPUT_SHAPE
+from top_vae_3d_pose import bones
+
 
 matplotlib.use('Agg')
 # matplotlib.use('TkAgg')
@@ -237,7 +237,7 @@ def keys2d_to_list(train_set_2d, test_set_2d, key2d_with_frame=False):
             if key2d_with_frame:
                 keys.append((*key, frame))
                 frame += 1
-            else :
+            else:
                 keys.append(key)
 
     for key in keys_2d_test:
@@ -246,7 +246,7 @@ def keys2d_to_list(train_set_2d, test_set_2d, key2d_with_frame=False):
             if key2d_with_frame:
                 keys.append((*key, frame))
                 frame += 1
-            else :
+            else:
                 keys.append(key)
 
     return np.array(keys)
@@ -264,18 +264,17 @@ def pre_pros_img(image, image_size, crop_padding=32):
     offset_width = ((w - padded_center_crop_size) + 1) // 2
 
     image_crop = image[
-                     offset_height: padded_center_crop_size + offset_height,
-                     offset_width: padded_center_crop_size + offset_width,
-                 ]
+        offset_height: padded_center_crop_size + offset_height,
+        offset_width: padded_center_crop_size + offset_width,
+    ]
 
     resized_image = cv2.resize(image_crop, (image_size, image_size), interpolation=cv2.INTER_CUBIC)
 
-    return  (resized_image / 255) * 2 - 1
+    return  resized_image
 
 
-
-def load_frame_from_key(key2d, efficientnet_preprocess=False):
-    """ Return the image frame that belongs to the 2d key """
+def key2d_to_img_path(key2d):
+    """ Return the path of the image fram that belongs to the 2d key """
     subject, _, action, frame = key2d
     action = action.replace('.h5', '')
 
@@ -288,27 +287,19 @@ def load_frame_from_key(key2d, efficientnet_preprocess=False):
             action = action.replace(ac_rpl[0], ac_rpl[1])
 
     img_path = 'training/subject/S%s/image_frames/%s/frame_%06d.jpg' % (subject, action, int(frame))
-    img_path = os.path.join(ENV.FLAGS.human_36m_path, img_path)
+    return img_path
+
+
+def load_frame_from_key(key2d, efficientnet_preprocess=False):
+    """ Return the image frame that belongs to the 2d key """
+    img_path = os.path.join(ENV.FLAGS.human_36m_path, key2d_to_img_path(key2d))
     img = cv2.imread(img_path)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     if efficientnet_preprocess:
-        # img_ccr = center_crop_and_resize(img, image_size=EFFICIENT_NET_INPUT_SHAPE[1])
-        # img_p = preprocess_input(img_ccr)
-
         img = pre_pros_img(img, image_size=EFFICIENT_NET_INPUT_SHAPE[0], crop_padding=100)
 
-        return img
-
-    return img
-
-
-# def load_frames_from_keys(keys2d, efficientnet_preprocess=False):
-#     """ Return the images that belong to the keys """
-#     return np.array([
-#         load_frame_from_key(key2d, efficientnet_preprocess=efficientnet_preprocess)
-#         for key2d in tqdm(keys2d, ascii=True, leave=False)
-#     ])
+    return (img / 255.0) * 2 - 1
 
 
 def load_frames_from_keys(keys2d, efficientnet_preprocess=False):
@@ -330,7 +321,25 @@ def load_frames_from_keys(keys2d, efficientnet_preprocess=False):
     return np.array(images)
 
 
-def load_2d_3d_data(return_raw=False, key2d_with_frame=False):
+def load_effnet_h5py_outputs(order_keys, sizes):
+    """ Return the outputs of proccessing the frames with the efficientNet model """
+    h5file = h5py.File(ENV.FLAGS.effnet_outputs_path, 'r')
+
+    data = []
+
+    for key, size in zip(order_keys, sizes):
+        subject, action, current_action = key
+        current_action = current_action.replace('.h5', '')
+        outs = h5file[str(subject)][action][current_action]['data']
+        # The size of the quantity of 2d joints is necessary cause some frames are missing
+        data.append(np.array(outs)[:size])
+
+    h5file.close()
+
+    return np.concatenate(data, axis=0)
+
+
+def load_2d_3d_data(return_raw=False, key2d_with_frame=False, load_effnet_outputs=False):
     """ Load the 2d and 3d data and returns two datasets for train and test """
     train_set_2d, test_set_2d, \
     data_mean_2d, data_std_2d, \
@@ -362,7 +371,14 @@ def load_2d_3d_data(return_raw=False, key2d_with_frame=False):
     # Get the keys for 2d points
     keys_2d_train = list(train_set_2d.keys())
     keys_2d_test = list(test_set_2d.keys())
-    # join the train and test
+
+    if load_effnet_outputs:
+        sizes = [train_set_2d[key].shape[0] for key in keys_2d_train]
+        sizes += [test_set_2d[key].shape[0] for key in keys_2d_test]
+        effnet_outputs = load_effnet_h5py_outputs(keys_2d_train + keys_2d_test, sizes)
+        effnet_outputs_train, effnet_outputs_test = suffle_and_split(effnet_outputs, idx)
+
+    # join the train and test for 2d joints
     all_set = join_data(train_set_2d, test_set_2d, keys_2d_train, keys_2d_test)
     # shuffle and split
     train_set_2d, test_set_2d = suffle_and_split(all_set, idx)
@@ -396,10 +412,12 @@ def load_2d_3d_data(return_raw=False, key2d_with_frame=False):
     train = Dataset2D3D(train_set_2d, train_set_3d,
                         meta2d, meta3d_train,
                         train_keys,
+                        effnet_out=effnet_outputs_train,
                         batch_size=ENV.FLAGS.batch_size, shuffle=True)
     test = Dataset2D3D(test_set_2d, test_set_3d,
                        meta2d, meta3d_test,
                        test_keys,
+                       effnet_out=effnet_outputs_test,
                        batch_size=ENV.FLAGS.batch_size, shuffle=True)
 
     return train, test
@@ -416,15 +434,23 @@ class Dataset2D3D(tf.keras.utils.Sequence):
                  x_metadata,
                  y_metadata,
                  mapkeys,
+                 effnet_out=None,
                  batch_size=64,
-                 shuffle=True):
+                 shuffle=True,
+                 pred_bones=False):
         self.x_data = x_data
         self.y_data = y_data
         self.x_metadata = x_metadata
         self.y_metadata = y_metadata
         self.mapkeys = mapkeys
+        self.effnet_out = effnet_out
         self.batch_size = batch_size
         self.shuffle = shuffle
+        self.pred_bones = pred_bones
+        if self.pred_bones:
+            self.bones_mapping = bones.get_bones_mapping()
+            self.bones = bones.get_bones_joints(self.bones_mapping)
+
 
         self.batch_step = 0
         self.batch_idx = None
@@ -440,7 +466,10 @@ class Dataset2D3D(tf.keras.utils.Sequence):
         'Generate one batch of data'
         # Generate indexes of the batch
         self.batch_idx = self.indexes[index*self.batch_size : (index+1)*self.batch_size]
-        return self.x_data[self.batch_idx, :], self.y_data[self.batch_idx, :]
+        x_data, y_data = self.x_data[self.batch_idx, :], self.y_data[self.batch_idx, :]
+        if self.pred_bones:
+            y_data = bones.convert_to_bones(y_data)
+        return x_data, y_data
 
 
     def __iter__(self):
@@ -462,6 +491,12 @@ class Dataset2D3D(tf.keras.utils.Sequence):
             return
         if self.shuffle is True:
             np.random.shuffle(self.indexes)
+
+
+    def get_effnet_out_batch(self):
+        """ Return the output of the effnet that belongs to the current batch """
+        return self.effnet_out[self.batch_idx, :]
+
 
 
 def load_dataset_3d_seq(seq_len=4):

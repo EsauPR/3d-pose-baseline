@@ -3,8 +3,6 @@
 import tensorflow as tf
 from tensorflow import keras
 
-import efficientnet.tfkeras as efn
-
 
 EFFICIENT_NET_INPUT_SHAPE = (224, 224, 3)
 
@@ -483,36 +481,23 @@ class PoseBase(tf.keras.Model):
 
 class Pose3DVae(keras.Model):
     """ Model with the 3dpose prediction + VAE filter """
-    def __init__(self, latent_dim, enc_dim, dec_dim, efficient_net=None, use_2d=False):
+    def __init__(self, latent_dim, enc_dim, dec_dim, use_effnet_ouptut=False, use_2d=False):
         super(Pose3DVae, self).__init__()
         self.use_2d = use_2d
         self.human_3d_size = 48
         self.human_2d_size = 32
+        self.effnet_size = 1280
 
         vae_input = self.human_3d_size
 
         if use_2d:
             vae_input += self.human_2d_size
 
-        self.use_effnet = False
-        if efficient_net is not None:
-            self.use_effnet = True
-            if efficient_net == 0:
-                self.effnet = efn.EfficientNetB1(weights='imagenet',
-                                                 include_top=False,
-                                                 pooling='max',
-                                                 input_shape=EFFICIENT_NET_INPUT_SHAPE)
-            elif efficient_net == 1:
-                self.effnet = efn.EfficientNetB0(weights='imagenet',
-                                                 include_top=False,
-                                                 pooling='max',
-                                                 input_shape=EFFICIENT_NET_INPUT_SHAPE)
-            else:
-                raise Exception("Only B0 or B1 are valid values for Efficient Net")
+        self.use_effnet_ouptut = use_effnet_ouptut
+        if use_effnet_ouptut:
+            vae_input += self.effnet_size
 
-            vae_input += self.effnet.layers[-1].output_shape[1]
-
-        if use_2d or efficient_net is not None:
+        if use_2d or use_effnet_ouptut is not None:
             self.concat = tf.keras.layers.Concatenate(axis=1)
 
         self.pose3d = PoseBase()
@@ -522,16 +507,15 @@ class Pose3DVae(keras.Model):
                        dec_dim=dec_dim)
 
 
-    def call(self, inputs, frame_inputs=None, training=True):
+    def call(self, inputs, effnet_output=None, training=True):
         out_2d3d = self.pose3d(inputs, training=training)
         out1 = out_2d3d
 
         if self.use_2d:
             out1 = self.concat([inputs, out1])
 
-        if self.use_effnet:
-            out1e = self.effnet(frame_inputs, training=training)
-            out1 = self.concat([out1, out1e])
+        if self.use_effnet_ouptut:
+            out1 = self.concat([out1, effnet_output])
 
         out2 = self.vae(out1, training=training)
 

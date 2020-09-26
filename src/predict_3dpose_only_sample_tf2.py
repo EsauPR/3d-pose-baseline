@@ -212,7 +212,7 @@ def sample():
             # _, _, poses3d = model.step(sess, enc_in[bidx], dec_out[bidx], dp, isTraining=False)
             out_3d, out_vae = model(enc_in[bidx], training=False)
 
-            err3d, errvae = losses.ELBO.compute_loss_3d_vs_vae(dec_out[bidx], out_3d, out_vae)
+            err3d, errvae = losses.ELBO.compute_error_3d_vs_vae(dec_out[bidx], out_3d, out_vae)
 
             loss_3d_sa(err3d)
             loss_vae_sa(errvae)
