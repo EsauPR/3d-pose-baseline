@@ -2,6 +2,7 @@
 
 import os
 import argparse
+import yaml
 
 BAR_FORMAT = '{l_bar}{bar:30}{r_bar}'
 
@@ -92,6 +93,8 @@ class __ENV():
                             help="File path for the outputs of the efficientNet model")
         parser.add_argument("--bones_mapping_dir", type=str, default="src/bones_mapping.yml",
                             help="File that maps the bones arquitecture")
+        parser.add_argument("--cfg_file", type=str, default="src/train.yml",
+                            help="Config file, the values passed through args are remplaced by the specified in the file")
 
         parser.add_argument("--sample", action='store_true', default=False,
                             help="Set to True for sampling.")
@@ -101,10 +104,11 @@ class __ENV():
         parser.add_argument("--verbose", type=int, default=2,
                             help="0:Error, 1:Warning, 2:INFO*(default), 3:debug")
 
+
         self.__parser = parser
 
 
-    def setup(self):
+    def setup(self, read_from_config=False):
         """ Set the FLAGS """
         self.FLAGS = self.__parser.parse_args()
 
@@ -121,8 +125,22 @@ class __ENV():
         self.SUMMARIES_DIR = os.path.join( self.TRAIN_DIR, "log" ) # Directory for TB summaries
 
         # To avoid race conditions: https://github.com/tensorflow/tensorflow/issues/7448
-        os.system('mkdir -p {}'.format(self.SUMMARIES_DIR))
+        # os.system('mkdir -p {}'.format(self.SUMMARIES_DIR))
+
+        if read_from_config:
+            self.reaload_from_config_file()
+
         print(self.FLAGS)
+
+
+    def reaload_from_config_file(self):
+        """ Read config file to FLAGS """
+        with open(self.FLAGS.cfg_file) as fyml:
+            cfg = yaml.load(fyml, Loader=yaml.FullLoader)
+
+        for _, data in cfg.items():
+            for key, value in data.items():
+                self.FLAGS.__setattr__(key, value)
 
 
 ENVIRON = __ENV()

@@ -1,0 +1,13 @@
+train:
+  step_log: 2000
+  learning_rate: 0.0001
+  # Reconstruction factor loss
+  likelihood_factor: 100.0
+  # Kinematics factor loss
+  kcs_factor: 0.02
+  # DKL factor loss
+  dkl_factor: 1.0
+  # For losses when the prediciont is bones magnitudes and direcctions
+  mag_factor: 10.0
+  cos_factor: 100.0
+  ang_factor: 100.0
