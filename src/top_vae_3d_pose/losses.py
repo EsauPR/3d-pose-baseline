@@ -87,11 +87,11 @@ class ELBO():
             bones_real_dir = []
             for i, j in zip(map_i, map_j):
                 if i == 0: # Hip, this joint is the origin and this is not predicted
-                    bones_pred_dir.append(- pred_out[k][j-1])
-                    bones_real_dir.append(- real_out[k][j-1])
+                    bones_pred_dir.append(pred_out[k][j-1])
+                    bones_real_dir.append(real_out[k][j-1])
                     continue
-                bones_pred_dir.append(pred_out[k][i-1] - pred_out[k][j-1])
-                bones_real_dir.append(real_out[k][i-1] - real_out[k][j-1])
+                bones_pred_dir.append(pred_out[k][j-1] - pred_out[k][i-1])
+                bones_real_dir.append(real_out[k][j-1] - real_out[k][i-1])
             dirs_pred.append(tf.stack(bones_pred_dir))
             dirs_real.append(tf.stack(bones_real_dir))
             # print(dirs_pred[-1], flush=True)
@@ -107,3 +107,50 @@ class ELBO():
 
         # Return the sum of every length change as error
         return tf.reduce_sum(tf.abs(phi), axis=[2, 1])
+
+
+
+def loss_bones(model, inputs, targets):
+    """ ELBO """
+    magnitudes, dir_cos = targets
+
+    # mean and log var from q(theta: z|x)
+    mean, log_var = model.encode(inputs)
+
+    # Latent variables from distribution q
+    z = model.reparametrize(mean, log_var)
+    # sample of P(x|z)
+    out_vae = model.decode(z)
+    pred_mag, pred_dir_cos = out_vae[0], out_vae[1]
+
+    # Dkl(Q(z|x)||P(z))
+    dkl_loss = 0.5 * tf.reduce_sum(tf.math.exp(log_var) + tf.math.square(mean) - 1.0 - log_var,
+                                    axis=-1)
+    # Reconstruction loss
+    # loss 1 error between the bones lenghts
+    # tf.print(magnitudes.shape, pred_mag.shape)
+    like_loss_1 = tf.reduce_mean(tf.square(magnitudes - pred_mag), axis=-1)
+
+    # # losss 2 error between directions
+    # # compute scalar product between the angles
+    # like_loss_2 = dir_cos * pred_dir_cos
+    # like_loss_2 = tf.reshape(like_loss_2, (like_loss_2.shape[0], -1, 3))
+    # # cos theta = u . v , where u and v are unit vectors
+    # like_loss_2 = 1 - tf.square(tf.reduce_sum(like_loss_2, axis=2)) # if theta = 0, cos(0) = 1
+
+    like_loss_2 = 3.0 * tf.reduce_mean(tf.square(dir_cos - pred_dir_cos), axis=-1)
+
+    dkl_loss = ENV.FLAGS.dkl_factor * tf.reduce_mean(dkl_loss)
+    like_loss_1 = ENV.FLAGS.mag_factor * tf.reduce_mean(like_loss_1)
+    like_loss_2 = ENV.FLAGS.cos_factor * tf.reduce_mean(like_loss_2)
+
+    ang_real = tf.transpose(tf.reshape(dir_cos, (dir_cos.shape[0], -1, 3)), perm=[0, 2, 1])
+    ang_pred = tf.transpose(tf.reshape(pred_dir_cos, (pred_dir_cos.shape[0], -1, 3)), perm=[0, 2, 1])
+
+    like_loss_3 = tf.linalg.matmul(ang_real, ang_real, transpose_a=True) - \
+                  tf.linalg.matmul(ang_pred, ang_pred, transpose_a=True)
+    like_loss_3 = ENV.FLAGS.ang_factor * tf.reduce_mean(tf.abs(like_loss_3), axis=[2, 1, 0])
+
+    loss = tf.stack([like_loss_1, like_loss_2, dkl_loss, like_loss_3])
+
+    return loss
