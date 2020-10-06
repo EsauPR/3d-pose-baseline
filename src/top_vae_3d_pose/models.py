@@ -3,6 +3,8 @@
 import tensorflow as tf
 from tensorflow import keras
 
+from top_vae_3d_pose import bones
+
 
 EFFICIENT_NET_INPUT_SHAPE = (224, 224, 3)
 
@@ -17,7 +19,7 @@ class VAE(tf.keras.Model):
         self.dec_dim = dec_dim
         self.human_3d_size = human_3d_size
         self._build_encoder()
-        self._buil_decoder()
+        self._build_decoder()
 
 
     def _build_encoder(self):
@@ -35,7 +37,7 @@ class VAE(tf.keras.Model):
         self.encoder.summary()
 
 
-    def _buil_decoder(self):
+    def _build_decoder(self):
         dec_in = keras.Input(shape=(self.latent_dim), name='dec_input')
         dec_f = dec_in
 
@@ -436,6 +438,7 @@ class PoseBase(tf.keras.Model):
                 name='b4'
             )
 
+
     def call(self, inputs, training=True):
         y_out = inputs
 
@@ -481,17 +484,22 @@ class PoseBase(tf.keras.Model):
 
 class Pose3DVae(keras.Model):
     """ Model with the 3dpose prediction + VAE filter """
-    def __init__(self, latent_dim, enc_dim, dec_dim, use_effnet_ouptut=False, use_2d=False):
+    def __init__(self, latent_dim, enc_dim, dec_dim, use_effnet_ouptut=False, use_2d=False, pred_bones=False):
         super(Pose3DVae, self).__init__()
         self.use_2d = use_2d
         self.human_3d_size = 48
         self.human_2d_size = 32
         self.effnet_size = 1280
+        self.pred_bones = pred_bones
 
         vae_input = self.human_3d_size
 
         if use_2d:
             vae_input += self.human_2d_size
+            self.bones_joints = bones.get_bones_joints(bones.get_bones_mapping())
+
+        if self.pred_bones:
+            vae_input += self.human_3d_size // 3
 
         self.use_effnet_ouptut = use_effnet_ouptut
         if use_effnet_ouptut:
@@ -501,15 +509,25 @@ class Pose3DVae(keras.Model):
             self.concat = tf.keras.layers.Concatenate(axis=1)
 
         self.pose3d = PoseBase()
-        self.vae = VAE(input_size=vae_input,
-                       latent_dim=latent_dim,
-                       enc_dim=enc_dim,
-                       dec_dim=dec_dim)
+        if pred_bones:
+            self.vae = VAEBones(input_size=vae_input,
+                                latent_dim=latent_dim,
+                                enc_dim=enc_dim,
+                                dec_dim=dec_dim)
+        else:
+            self.vae = VAE(input_size=vae_input,
+                           latent_dim=latent_dim,
+                           enc_dim=enc_dim,
+                           dec_dim=dec_dim)
 
 
     def call(self, inputs, effnet_output=None, training=True):
         out_2d3d = self.pose3d(inputs, training=training)
         out1 = out_2d3d
+
+        if self.pred_bones:
+            mags, dir_cos = bones.convert_to_bones(out_2d3d.numpy(), self.bones_joints )
+            out1 = self.concat([mags, dir_cos])
 
         if self.use_2d:
             out1 = self.concat([inputs, out1])
@@ -520,3 +538,36 @@ class Pose3DVae(keras.Model):
         out2 = self.vae(out1, training=training)
 
         return out_2d3d, out2
+
+
+
+class VAEBones(VAE):
+    """ Variational autoencoder for bones """
+
+    def _build_decoder(self):
+        dec_in = keras.Input(shape=(self.latent_dim), name='dec_input')
+        dec_f = dec_in
+
+        for units in self.dec_dim:
+            dec_f = keras.layers.Dense(units=units,
+                                       activation='relu',
+                                       name='dec_f_%d' % units)(dec_f)
+        # Magnitudes
+        dec_out1 = keras.layers.Dense(units=self.human_3d_size//3,
+                                      activation='relu',
+                                      name="mag1")(dec_f)
+        dec_out1 = keras.layers.Dense(units=self.human_3d_size//3,
+                                      name="mag2")(dec_out1)
+        # Direction cosines
+        dec_out2 = keras.layers.Dense(units=self.human_3d_size,
+                                      activation='relu',
+                                      name="cos1")(dec_f)
+        dec_out2 = keras.layers.Dense(units=self.human_3d_size,
+                                      name="cos2")(dec_out1)
+
+        # dec_out2 = keras.layers.Reshape((-1, self.human_3d_size//3, 3))(dec_out2)
+        # dec_out2 = tf.keras.layers.Lambda(lambda data: tf.clip_by_norm(data, 1.0, axes=[2]))(dec_out2)
+        # dec_out2 = keras.layers.Reshape((-1, self.human_3d_size))(dec_out2)
+
+        self.decoder = keras.Model(inputs=dec_in, outputs=[dec_out1, dec_out2], name='decoder')
+        self.decoder.summary()
