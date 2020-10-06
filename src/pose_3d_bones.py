@@ -16,7 +16,7 @@ from tqdm import tqdm
 import cameras
 import data_utils
 import viz
-from top_vae_3d_pose import data_handler, losses, models
+from top_vae_3d_pose import data_handler, losses, models, bones
 from top_vae_3d_pose.args_def import ENVIRON as ENV
 
 matplotlib.use('Agg')
@@ -71,6 +71,7 @@ def gen_sample_img(dataset, model=None, idx=None):
     points_2d = dataset.x_data[idx, :]
     points_3d = dataset.y_data[idx, :]
     out_3d, out_3d_vae = model(points_2d, effnet_output=effnet_out, training=False)
+    out_3d_vae = bones.convert_to_joints(dataset.bones_mapping, out_3d_vae[0].numpy(), out_3d_vae[1].numpy().reshape(-1, 16, 3))
 
     # unnormalioze data
     points_2d = data_utils.unNormalizeData(points_2d,
@@ -138,7 +139,7 @@ def gen_sample_img(dataset, model=None, idx=None):
         exidx = exidx + 1
         subplot_idx = subplot_idx + 4
 
-    file_name = "imgs/3d_effnet_2d_vae/%s.png" % datetime.utcnow().isoformat()
+    file_name = "imgs/3d_effnet_2d_vae_bones/%s.png" % datetime.utcnow().isoformat()
     plt.savefig(file_name)
     print("Saved samples on: %s" % file_name)
     # plt.show()
@@ -155,13 +156,15 @@ def get_optimizer():
 
 
 @tf.function
-def train_step_vae(model, x_data, y_data, effnet_out, optimizer):
+def train_step_vae(model, x_data, y_data, effnet_out, optimizer, bones_joints=False):
     """ Define a train step """
     with tf.GradientTape() as tape:
         x_out_3d = model.pose3d(x_data, training=ENV.FLAGS.train_all)
+        mag, dir_cos = bones.convert_to_bones_tf(x_out_3d, bones_joints)
+        x_out_3d = model.concat([mag, dir_cos])
         x_out = model.concat([x_data, x_out_3d, effnet_out])
 
-        loss = losses.ELBO.compute_loss(model.vae, x_out, y_data)
+        loss = losses.loss_bones(model.vae, x_out, y_data)
         loss_sum = tf.reduce_sum(loss)
     gradients = tape.gradient(loss_sum, model.vae.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.vae.trainable_variables))
@@ -171,18 +174,20 @@ def train_step_vae(model, x_data, y_data, effnet_out, optimizer):
 def train():
     """ Train function """
     data_train, data_test = data_handler.load_2d_3d_data(key2d_with_frame=True,
-                                                         load_effnet_outputs=True)
+                                                         load_effnet_outputs=True,
+                                                         pred_bones=True)
     print("Dataset dims")
     print(data_train.x_data.shape, data_train.y_data.shape)
     print(data_test.x_data.shape, data_test.y_data.shape)
     print(data_train.y_metadata.dim_used)
     print(data_train.y_metadata.dim_ignored)
-
+    print(data_train.bones_ids)
     model = models.Pose3DVae(latent_dim=ENV.FLAGS.latent_dim,
                              enc_dim=ENV.FLAGS.enc_dim,
                              dec_dim=ENV.FLAGS.dec_dim,
                              use_effnet_ouptut=True,
-                             use_2d=True)
+                             use_2d=True,
+                             pred_bones=True)
     # Dummy input for creation for bach normalization weigths
     ainput = np.ones((10, 32), dtype=np.float32)
     model.pose3d(ainput, training=False)
@@ -192,7 +197,7 @@ def train():
     optimizer = get_optimizer()
 
     ckpt = tf.train.Checkpoint(step=tf.Variable(1), optimizer=optimizer, net=model)
-    manager = tf.train.CheckpointManager(ckpt, './experiments/3d_effnet_2d_vae/tf_ckpts', max_to_keep=10)
+    manager = tf.train.CheckpointManager(ckpt, './experiments/3d_effnet_2d_vae_bones/tf_ckpts', max_to_keep=10)
     ckpt.restore(manager.latest_checkpoint)
     if manager.latest_checkpoint:
         print("Restaurado de {}".format(manager.latest_checkpoint))
@@ -228,20 +233,20 @@ def train():
         loss_train = tf.keras.metrics.Mean()
 
         pbar = tqdm(data_train, bar_format=ENV.BAR_FORMAT, ascii=True)
-        losses.ELBO.PBAR = pbar
-        losses.ELBO.LOG = True
         for step, (x_train, y_train) in enumerate(pbar):
             effnet_out = data_train.get_effnet_out_batch()
 
-            step_loss = train_step_vae(model, x_train, y_train, effnet_out, optimizer)
+            step_loss = train_step_vae(model, x_train, y_train, effnet_out, optimizer, bones_joints=data_train.bones_ids)
             loss_train(step_loss)
-            pbar.set_description("Losses:: REC %.4f, KCS %.4f, DKL %.4f" % (step_loss[0],
-                                                                            step_loss[1],
-                                                                            step_loss[2]))
+            pbar.set_description("Losses:: MAG %.4f, COS %.4f, DKL %.4f, ANG %.4f" % (step_loss[0],
+                                                                                      step_loss[1],
+                                                                                      step_loss[2],
+                                                                                      step_loss[3]))
             if step % ENV.FLAGS.step_log == 0:
                 ltp = tf.math.reduce_sum(step_loss)
                 tqdm.write(" Training loss at step %d: %.4f" % (step, ltp))
                 tqdm.write(" Seen : %s samples" % ((step + 1) * ENV.FLAGS.batch_size))
+                ENV.reaload_from_config_file()
 
         loss_train_history.append(loss_train.result())
 
@@ -257,11 +262,22 @@ def train():
             effnet_out = data_test.get_effnet_out_batch()
 
             x_out_3d = model.pose3d(x_test, training=False)
-            x_out = model.concat([x_test, x_out_3d, effnet_out])
+            x_out_3d_md = model.concat([*bones.convert_to_bones(x_out_3d, data_test.bones_ids)])
+
+            x_out = model.concat([x_test, x_out_3d_md, effnet_out])
             vae_out = model.vae(x_out, training=False)
 
             # loss = tf.reduce_sum(losses.ELBO.compute_loss(model.vae, x_out, y_test))
             # loss_test(loss)
+            mag = vae_out[0].numpy()
+            dir_cos = vae_out[1].numpy().reshape(-1, 16, 3)
+            vae_out = bones.convert_to_joints(data_test.bones_mapping, mag, dir_cos)
+            vae_out = tf.convert_to_tensor(vae_out)
+
+
+
+            y_test = bones.convert_to_joints(data_test.bones_mapping, y_test[0], y_test[1].reshape(-1, 16, 3))
+
             err_3d, err_vae = losses.ELBO.compute_error_3d_vs_vae(y_test, x_out_3d, vae_out)
             error_3d_out(err_3d)
             error_vae_out(err_vae)
@@ -291,8 +307,8 @@ def train():
                                   fname='error.png')
 
         # Save the weights of the las model and the config use to run and train
-        model.save_weights('./experiments/3d_effnet_2d_vae/last_model_weights')
-        with open('./experiments/3d_effnet_2d_vae/train.cfg', 'w') as cfg:
+        model.save_weights('./experiments/3d_effnet_2d_vae_bones/last_model_weights')
+        with open('./experiments/3d_effnet_2d_vae_bones/train.cfg', 'w') as cfg:
             json.dump(vars(ENV.FLAGS), cfg)
 
     data_handler.save_history(loss_train_history, 'train_loss.npy')
@@ -304,7 +320,7 @@ def train():
 
 def main():
     """ Main """
-    os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+    # os.environ['CUDA_VISIBLE_DEVICES'] = '2'
     os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
     # gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -324,5 +340,5 @@ def main():
 
 
 if __name__ == "__main__":
-    ENV.setup()
+    ENV.setup(read_from_config=True)
     main()

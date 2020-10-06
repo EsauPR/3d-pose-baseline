@@ -2,9 +2,11 @@
 
 import yaml
 
+import tensorflow as tf
 import numpy as np
 
 from top_vae_3d_pose.args_def import ENVIRON as ENV
+
 
 
 def get_bones_mapping():
@@ -42,6 +44,60 @@ def get_bones_joints(bones_mapping):
     return bja, bjb
 
 
+def get_bones_vectors_tf(map_i, map_j, joints):
+    """ Return the matrix with the vectors of each bone
+        This functions is necessary because tf does not support
+        array indexing like numpy
+    """
+    # Reshape to [num samples, joint, coordinates[x,y,z]]
+    joints = tf.reshape(joints, (joints.shape[0], -1, 3))
+
+    # Compute the direction matrix for each sample by the map_i and map_j bones mapping
+    # [num sample, direction[x,y,z], bone]
+    all_b_v = []
+    for k in range(joints.shape[0]):
+        bones_vectors = []
+        for idx in range(map_i.shape[0]):
+            i, j = map_i[idx], map_j[idx]
+            if i == 0: # Hip, this joint is the origin and this is not predicted
+                bones_vectors.append(joints[k][j-1])
+                continue
+            bones_vectors.append(joints[k][j-1] - joints[k][i-1])
+        all_b_v.append(tf.stack(bones_vectors))
+
+    return tf.stack(all_b_v)
+
+
+def convert_to_bones_tf(joints, bones_joints):
+    """ Transform the joints to direction cosines and magnitudes """
+    joints = tf.reshape(joints, (joints.shape[0], -1, 3))
+    map_i = np.array([ 0,  1,  2,  0,  4,  5,  0,  7,  8,  9,  9, 14, 15,  9, 11, 12])
+    map_j = np.array([ 1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 14, 15, 16, 11, 12, 13])
+
+    # Compute the direction matrix for each sample by the map_i and map_j bones mapping
+    # [num sample, direction[x,y,z], bone]
+    all_b_v = []
+    for k in range(joints.shape[0]):
+        bv = []
+        for idx in range(map_i.shape[0]):
+            i, j = map_i[idx], map_j[idx]
+            if i == 0: # Hip, this joint is the origin and this is not predicted
+                bv.append(joints[k][j-1])
+                continue
+            bv.append(joints[k][j-1] - joints[k][i-1])
+        all_b_v.append(tf.stack(bv))
+
+    # bones vector with origin in (0, 0, 0)
+    bones_vectors = tf.stack(all_b_v)
+
+    bones_magnitudes = tf.sqrt(tf.reduce_sum(tf.square(bones_vectors), axis=2))
+
+    # derection cosines
+    bones_dir_cos = bones_vectors / tf.stack([bones_magnitudes, bones_magnitudes, bones_magnitudes], axis=2)
+
+    return bones_magnitudes, tf.reshape(bones_dir_cos, (bones_dir_cos.shape[0], -1))
+
+
 def convert_to_bones(joints, bones_joints):
     """ Transform the joints to direction cosines and magnitudes """
     bja, bjb = bones_joints
@@ -62,7 +118,7 @@ def convert_to_bones(joints, bones_joints):
     bones_dir_cos = bones_vectors / np.stack([bones_magnitudes, bones_magnitudes, bones_magnitudes], axis=2)
     # bones_dir_cos.shape
 
-    return bones_magnitudes, bones_dir_cos
+    return bones_magnitudes.astype('float32'), bones_dir_cos.reshape(bones_dir_cos.shape[0], -1).astype('float32')
 
 
 def convert_to_joints(bones_mapping, magnitudes, dir_cos):
@@ -94,4 +150,4 @@ def convert_to_joints(bones_mapping, magnitudes, dir_cos):
 
     bone_walk(bones_mapping['bones_path'][0], start)
 
-    return joints
+    return joints.reshape(joints.shape[0], -1)

@@ -4,19 +4,19 @@ import concurrent.futures
 import os
 from collections import namedtuple
 
-import cameras
 import cv2
-import data_utils
 import h5py
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 
+import cameras
+import data_utils
+
+from top_vae_3d_pose import bones
 from top_vae_3d_pose.args_def import ENVIRON as ENV
 from top_vae_3d_pose.models import EFFICIENT_NET_INPUT_SHAPE
-from top_vae_3d_pose import bones
-
 
 matplotlib.use('Agg')
 # matplotlib.use('TkAgg')
@@ -321,6 +321,7 @@ def load_frames_from_keys(keys2d, efficientnet_preprocess=False):
     return np.array(images)
 
 
+
 def load_effnet_h5py_outputs(order_keys, sizes):
     """ Return the outputs of proccessing the frames with the efficientNet model """
     h5file = h5py.File(ENV.FLAGS.effnet_outputs_path, 'r')
@@ -339,7 +340,8 @@ def load_effnet_h5py_outputs(order_keys, sizes):
     return np.concatenate(data, axis=0)
 
 
-def load_2d_3d_data(return_raw=False, key2d_with_frame=False, load_effnet_outputs=False):
+def load_2d_3d_data(return_raw=False, key2d_with_frame=False, load_effnet_outputs=False,
+                    pred_bones=False):
     """ Load the 2d and 3d data and returns two datasets for train and test """
     train_set_2d, test_set_2d, \
     data_mean_2d, data_std_2d, \
@@ -377,6 +379,9 @@ def load_2d_3d_data(return_raw=False, key2d_with_frame=False, load_effnet_output
         sizes += [test_set_2d[key].shape[0] for key in keys_2d_test]
         effnet_outputs = load_effnet_h5py_outputs(keys_2d_train + keys_2d_test, sizes)
         effnet_outputs_train, effnet_outputs_test = suffle_and_split(effnet_outputs, idx)
+    else:
+        effnet_outputs_train = None
+        effnet_outputs_test = None
 
     # join the train and test for 2d joints
     all_set = join_data(train_set_2d, test_set_2d, keys_2d_train, keys_2d_test)
@@ -413,12 +418,12 @@ def load_2d_3d_data(return_raw=False, key2d_with_frame=False, load_effnet_output
                         meta2d, meta3d_train,
                         train_keys,
                         effnet_out=effnet_outputs_train,
-                        batch_size=ENV.FLAGS.batch_size, shuffle=True)
+                        batch_size=ENV.FLAGS.batch_size, shuffle=True, pred_bones=pred_bones)
     test = Dataset2D3D(test_set_2d, test_set_3d,
                        meta2d, meta3d_test,
                        test_keys,
                        effnet_out=effnet_outputs_test,
-                       batch_size=ENV.FLAGS.batch_size, shuffle=True)
+                       batch_size=ENV.FLAGS.batch_size, shuffle=True, pred_bones=pred_bones)
 
     return train, test
 
@@ -449,8 +454,7 @@ class Dataset2D3D(tf.keras.utils.Sequence):
         self.pred_bones = pred_bones
         if self.pred_bones:
             self.bones_mapping = bones.get_bones_mapping()
-            self.bones = bones.get_bones_joints(self.bones_mapping)
-
+            self.bones_ids = bones.get_bones_joints(self.bones_mapping)
 
         self.batch_step = 0
         self.batch_idx = None
@@ -468,7 +472,7 @@ class Dataset2D3D(tf.keras.utils.Sequence):
         self.batch_idx = self.indexes[index*self.batch_size : (index+1)*self.batch_size]
         x_data, y_data = self.x_data[self.batch_idx, :], self.y_data[self.batch_idx, :]
         if self.pred_bones:
-            y_data = bones.convert_to_bones(y_data)
+            y_data = bones.convert_to_bones(y_data, self.bones_ids)
         return x_data, y_data
 
 
